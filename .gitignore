@@ -3,6 +3,7 @@ node_modules/
 .next/
 web/node_modules/
 web/.next/
+.turbo/
 
 # Logs
 npm-debug.log*
