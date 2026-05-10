@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from .runtime import ExecutionAgentRuntime, ExecutionResult
 from ...logging_config import logger
+from .runtime import ExecutionAgentRuntime, ExecutionResult
 
 
 @dataclass
@@ -55,7 +55,9 @@ class ExecutionBatchManager:
         if not request_id:
             request_id = str(uuid.uuid4())
 
-        batch_id = await self._register_pending_execution(agent_name, instructions, request_id)
+        batch_id = await self._register_pending_execution(
+            agent_name, instructions, request_id
+        )
 
         try:
             logger.info(f"[{agent_name}] Execution started")
@@ -67,7 +69,9 @@ class ExecutionBatchManager:
             status = "SUCCESS" if result.success else "FAILED"
             logger.info(f"[{agent_name}] Execution finished: {status}")
         except asyncio.TimeoutError:
-            logger.error(f"[{agent_name}] Execution timed out after {self.timeout_seconds}s")
+            logger.error(
+                f"[{agent_name}] Execution timed out after {self.timeout_seconds}s"
+            )
             result = ExecutionResult(
                 agent_name=agent_name,
                 success=False,
@@ -144,7 +148,7 @@ class ExecutionBatchManager:
             await self._dispatch_to_interaction_agent(dispatch_payload)
 
     # Return list of currently pending execution requests for monitoring purposes
-    def get_pending_executions(self) -> List[Dict[str, str]]:
+    def get_pending_executions(self) -> List[Dict[str, str | float]]:
         """Expose pending executions for observability."""
 
         return [
@@ -153,7 +157,9 @@ class ExecutionBatchManager:
                 "agent_name": pending.agent_name,
                 "batch_id": pending.batch_id,
                 "created_at": pending.created_at.isoformat(),
-                "elapsed_seconds": (datetime.now() - pending.created_at).total_seconds(),
+                "elapsed_seconds": (
+                    datetime.now() - pending.created_at
+                ).total_seconds(),
             }
             for pending in self._pending.values()
         ]

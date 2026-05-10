@@ -2,24 +2,25 @@
 
 import inspect
 import json
-from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
-from .agent import ExecutionAgent
-from .tools import get_tool_schemas, get_tool_registry
 from ...config import get_settings
-from ...openrouter_client import request_chat_completion
 from ...logging_config import logger
+from ...openrouter_client import request_chat_completion
+from .agent import ExecutionAgent
+from .tools import get_tool_registry, get_tool_schemas
 
 
 @dataclass
 class ExecutionResult:
     """Result from an execution agent."""
+
     agent_name: str
     success: bool
     response: str
     error: Optional[str] = None
-    tools_executed: List[str] = None
+    tools_executed: List[str] | None = None
 
 
 class ExecutionAgentRuntime:
@@ -37,7 +38,9 @@ class ExecutionAgentRuntime:
         self.tool_schemas = get_tool_schemas()
 
         if not self.api_key:
-            raise ValueError("OpenRouter API key not configured. Set OPENROUTER_API_KEY environment variable.")
+            raise ValueError(
+                "OpenRouter API key not configured. Set OPENROUTER_API_KEY environment variable."
+            )
 
     # Main execution loop for running agent with LLM calls and tool execution
     async def execute(self, instructions: str) -> ExecutionResult:
@@ -55,11 +58,15 @@ class ExecutionAgentRuntime:
                 logger.info(
                     f"[{self.agent.name}] Requesting plan (iteration {iteration + 1})"
                 )
-                response = await self._make_llm_call(system_prompt, messages, with_tools=True)
+                response = await self._make_llm_call(
+                    system_prompt, messages, with_tools=True
+                )
                 assistant_message = response.get("choices", [{}])[0].get("message", {})
 
                 if not assistant_message:
-                    raise RuntimeError("LLM response did not include an assistant message")
+                    raise RuntimeError(
+                        "LLM response did not include an assistant message"
+                    )
 
                 raw_tool_calls = assistant_message.get("tool_calls", []) or []
                 parsed_tool_calls = self._extract_tool_calls(raw_tool_calls)
@@ -83,7 +90,9 @@ class ExecutionAgentRuntime:
 
                     if not tool_name:
                         logger.warning("Tool call missing name: %s", tool_call)
-                        failure = {"error": "Tool call missing name; unable to execute."}
+                        failure = {
+                            "error": "Tool call missing name; unable to execute."
+                        }
                         tool_message = {
                             "role": "tool",
                             "tool_call_id": call_id or "unknown_tool",
@@ -100,28 +109,38 @@ class ExecutionAgentRuntime:
                     success, result = await self._execute_tool(tool_name, tool_args)
 
                     if success:
-                        logger.info(f"[{self.agent.name}] Tool {tool_name} completed successfully")
+                        logger.info(
+                            f"[{self.agent.name}] Tool {tool_name} completed successfully"
+                        )
                         record_payload = self._safe_json_dump(result)
                     else:
-                        error_detail = result.get("error") if isinstance(result, dict) else str(result)
-                        logger.warning(f"[{self.agent.name}] Tool {tool_name} failed: {error_detail}")
+                        error_detail = (
+                            result.get("error")
+                            if isinstance(result, dict)
+                            else str(result)
+                        )
+                        logger.warning(
+                            f"[{self.agent.name}] Tool {tool_name} failed: {error_detail}"
+                        )
                         record_payload = error_detail
 
                     self.agent.record_tool_execution(
-                        tool_name,
-                        self._safe_json_dump(tool_args),
-                        record_payload
+                        tool_name, self._safe_json_dump(tool_args), record_payload
                     )
 
                     tool_message = {
                         "role": "tool",
                         "tool_call_id": call_id or tool_name,
-                        "content": self._format_tool_result(tool_name, success, result, tool_args),
+                        "content": self._format_tool_result(
+                            tool_name, success, result, tool_args
+                        ),
                     }
                     messages.append(tool_message)
 
             else:
-                raise RuntimeError("Reached tool iteration limit without final response")
+                raise RuntimeError(
+                    "Reached tool iteration limit without final response"
+                )
 
             if final_response is None:
                 raise RuntimeError("LLM did not return a final response")
@@ -132,7 +151,7 @@ class ExecutionAgentRuntime:
                 agent_name=self.agent.name,
                 success=True,
                 response=final_response,
-                tools_executed=tools_executed
+                tools_executed=tools_executed,
             )
 
         except Exception as e:
@@ -145,24 +164,30 @@ class ExecutionAgentRuntime:
                 agent_name=self.agent.name,
                 success=False,
                 response=failure_text,
-                error=error_msg
+                error=error_msg,
             )
 
     # Execute OpenRouter API call with system prompt, messages, and optional tool schemas
-    async def _make_llm_call(self, system_prompt: str, messages: List[Dict], with_tools: bool) -> Dict:
+    async def _make_llm_call(
+        self, system_prompt: str, messages: List[Dict], with_tools: bool
+    ) -> Dict:
         """Make an LLM call."""
         tools_to_send = self.tool_schemas if with_tools else None
-        logger.info(f"[{self.agent.name}] Calling LLM with model: {self.model}, tools: {len(tools_to_send) if tools_to_send else 0}")
+        logger.info(
+            f"[{self.agent.name}] Calling LLM with model: {self.model}, tools: {len(tools_to_send) if tools_to_send else 0}"
+        )
         return await request_chat_completion(
             model=self.model,
             messages=messages,
             system=system_prompt,
             api_key=self.api_key,
-            tools=tools_to_send
+            tools=tools_to_send,
         )
 
     # Parse and validate tool calls from LLM response into structured format
-    def _extract_tool_calls(self, raw_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _extract_tool_calls(
+        self, raw_tools: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Extract tool calls from an assistant message."""
         tool_calls: List[Dict[str, Any]] = []
 
@@ -178,11 +203,13 @@ class ExecutionAgentRuntime:
                     args = {}
 
             if name:
-                tool_calls.append({
-                    "id": tool.get("id"),
-                    "name": name,
-                    "arguments": args,
-                })
+                tool_calls.append(
+                    {
+                        "id": tool.get("id"),
+                        "name": name,
+                        "arguments": args,
+                    }
+                )
 
         return tool_calls
 
@@ -211,7 +238,9 @@ class ExecutionAgentRuntime:
                 "result": result,
             }
         else:
-            error_detail = result.get("error") if isinstance(result, dict) else str(result)
+            error_detail = (
+                result.get("error") if isinstance(result, dict) else str(result)
+            )
             payload = {
                 "tool": tool_name,
                 "status": "error",

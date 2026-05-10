@@ -14,7 +14,6 @@ from ...logging_config import logger
 from ...models import GmailConnectPayload, GmailDisconnectPayload, GmailStatusPayload
 from ...utils import error_response
 
-
 _CLIENT_LOCK = threading.Lock()
 _CLIENT: Optional[Any] = None
 
@@ -42,6 +41,7 @@ def get_active_gmail_user_id() -> Optional[str]:
 
 def _gmail_import_client():
     from composio import Composio  # type: ignore
+
     return Composio
 
 
@@ -94,7 +94,11 @@ def _extract_email(obj: Any) -> Optional[str]:
         if isinstance(email_addresses, (list, tuple)):
             for entry in email_addresses:
                 if isinstance(entry, dict):
-                    candidate = entry.get("value") or entry.get("email") or entry.get("emailAddress")
+                    candidate = (
+                        entry.get("value")
+                        or entry.get("email")
+                        or entry.get("emailAddress")
+                    )
                     if isinstance(candidate, str) and "@" in candidate:
                         return candidate
                 elif isinstance(entry, str) and "@" in entry:
@@ -156,12 +160,16 @@ def _fetch_profile_from_composio(user_id: Optional[str]) -> Optional[Dict[str, A
     if not sanitized:
         return None
     try:
-        result = execute_gmail_tool("GMAIL_GET_PROFILE", sanitized, arguments={"user_id": "me"})
+        result = execute_gmail_tool(
+            "GMAIL_GET_PROFILE", sanitized, arguments={"user_id": "me"}
+        )
     except RuntimeError as exc:
         logger.warning("GMAIL_GET_PROFILE invocation failed: %s", exc)
         return None
     except Exception as exc:  # pragma: no cover - defensive
-        logger.exception("Unexpected error fetching Gmail profile", extra={"user_id": sanitized})
+        logger.exception(
+            "Unexpected error fetching Gmail profile", extra={"user_id": sanitized}
+        )
         return None
 
     profile: Optional[Dict[str, Any]] = None
@@ -190,22 +198,32 @@ def _fetch_profile_from_composio(user_id: Optional[str]) -> Optional[Dict[str, A
                     profile = item["profile"]
                 if isinstance(profile, dict):
                     break
-        elif result.get("successful") is True and isinstance(result.get("result"), dict):
+        elif result.get("successful") is True and isinstance(
+            result.get("result"), dict
+        ):
             profile = result.get("result")  # type: ignore[assignment]
-        elif all(not isinstance(result.get(key), dict) for key in ("data", "profile", "result")):
+        elif all(
+            not isinstance(result.get(key), dict)
+            for key in ("data", "profile", "result")
+        ):
             profile = result if result else None
 
     if isinstance(profile, dict):
         _cache_profile(sanitized, profile)
         return profile
 
-    logger.warning("Received unexpected Gmail profile payload", extra={"user_id": sanitized, "raw": result})
+    logger.warning(
+        "Received unexpected Gmail profile payload",
+        extra={"user_id": sanitized, "raw": result},
+    )
     return None
 
 
 # Start Gmail OAuth connection process and return redirect URL
 def initiate_connect(payload: GmailConnectPayload, settings: Settings) -> JSONResponse:
-    auth_config_id = payload.auth_config_id or settings.composio_gmail_auth_config_id or ""
+    auth_config_id = (
+        payload.auth_config_id or settings.composio_gmail_auth_config_id or ""
+    )
     if not auth_config_id:
         return error_response(
             "Missing auth_config_id. Set COMPOSIO_GMAIL_AUTH_CONFIG_ID or pass auth_config_id.",
@@ -217,10 +235,16 @@ def initiate_connect(payload: GmailConnectPayload, settings: Settings) -> JSONRe
     _clear_cached_profile(user_id)
     try:
         client = _get_composio_client(settings)
-        req = client.connected_accounts.initiate(user_id=user_id, auth_config_id=auth_config_id)
+        link = getattr(client.connected_accounts, "link", None)
+        if not callable(link):
+            raise RuntimeError(
+                "Installed Composio SDK does not expose connected_accounts.link; upgrade the SDK to connect Gmail."
+            )
+        req = link(user_id=user_id, auth_config_id=auth_config_id)
         data = {
             "ok": True,
-            "redirect_url": getattr(req, "redirect_url", None) or getattr(req, "redirectUrl", None),
+            "redirect_url": getattr(req, "redirect_url", None)
+            or getattr(req, "redirectUrl", None),
             "connection_request_id": getattr(req, "id", None),
             "user_id": user_id,
         }
@@ -250,7 +274,9 @@ def fetch_status(payload: GmailStatusPayload) -> JSONResponse:
         account: Any = None
         if connection_request_id:
             try:
-                account = client.connected_accounts.wait_for_connection(connection_request_id, timeout=2.0)
+                account = client.connected_accounts.wait_for_connection(
+                    connection_request_id, timeout=2.0
+                )
             except Exception:
                 try:
                     account = client.connected_accounts.get(connection_request_id)
@@ -276,9 +302,17 @@ def fetch_status(payload: GmailStatusPayload) -> JSONResponse:
 
         account_user_id = None
         if account is not None:
-            status_value = getattr(account, "status", None) or (account.get("status") if isinstance(account, dict) else None)
+            status_value = getattr(account, "status", None) or (
+                account.get("status") if isinstance(account, dict) else None
+            )
             normalized_status = (status_value or "").upper()
-            connected = normalized_status in {"CONNECTED", "SUCCESS", "SUCCESSFUL", "ACTIVE", "COMPLETED"}
+            connected = normalized_status in {
+                "CONNECTED",
+                "SUCCESS",
+                "SUCCESSFUL",
+                "ACTIVE",
+                "COMPLETED",
+            }
             email = _extract_email(account)
             if hasattr(account, "user_id"):
                 account_user_id = getattr(account, "user_id", None)
@@ -332,7 +366,9 @@ def fetch_status(payload: GmailStatusPayload) -> JSONResponse:
 
 
 def disconnect_account(payload: GmailDisconnectPayload) -> JSONResponse:
-    connection_id = _normalized(payload.connection_id) or _normalized(payload.connection_request_id)
+    connection_id = _normalized(payload.connection_id) or _normalized(
+        payload.connection_request_id
+    )
     user_id = _normalized(payload.user_id)
 
     if not connection_id and not user_id:
@@ -344,7 +380,9 @@ def disconnect_account(payload: GmailDisconnectPayload) -> JSONResponse:
     try:
         client = _get_composio_client()
     except Exception as exc:
-        logger.exception("gmail disconnect failed: client init", extra={"user_id": user_id})
+        logger.exception(
+            "gmail disconnect failed: client init", extra={"user_id": user_id}
+        )
         return error_response(
             "Failed to disconnect Gmail",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -368,23 +406,32 @@ def disconnect_account(payload: GmailDisconnectPayload) -> JSONResponse:
             removed_ids.append(sanitized_id)
             if connection is not None:
                 if hasattr(connection, "user_id"):
-                    affected_user_ids.add(_normalized(getattr(connection, "user_id", None)))
+                    affected_user_ids.add(
+                        _normalized(getattr(connection, "user_id", None))
+                    )
                 elif isinstance(connection, dict):
                     affected_user_ids.add(_normalized(connection.get("user_id")))
         except Exception as exc:  # pragma: no cover - depends on remote state
-            logger.exception("Failed to remove Gmail connection", extra={"connection_id": sanitized_id})
+            logger.exception(
+                "Failed to remove Gmail connection",
+                extra={"connection_id": sanitized_id},
+            )
             errors.append(str(exc))
 
     if connection_id:
         _delete_connection(connection_id)
     else:
         try:
-            items = client.connected_accounts.list(user_ids=[user_id], toolkit_slugs=["GMAIL"])
+            items = client.connected_accounts.list(
+                user_ids=[user_id], toolkit_slugs=["GMAIL"]
+            )
             data = getattr(items, "data", None)
             if data is None and isinstance(items, dict):
                 data = items.get("data")
         except Exception as exc:  # pragma: no cover - dependent on SDK
-            logger.exception("Failed to list Gmail connections", extra={"user_id": user_id})
+            logger.exception(
+                "Failed to list Gmail connections", extra={"user_id": user_id}
+            )
             return error_response(
                 "Failed to disconnect Gmail",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

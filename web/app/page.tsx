@@ -71,17 +71,17 @@ export default function Page() {
     const detectAndStoreTimezone = async () => {
       // Only run if timezone not already stored
       if (settings.timezone) return;
-      
+
       try {
         const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        
+
         // Send to server
         const response = await fetch('/api/timezone', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ timezone: browserTimezone }),
         });
-        
+
         if (response.ok) {
           // Update local settings
           setSettings({ ...settings, timezone: browserTimezone });
@@ -150,21 +150,21 @@ export default function Page() {
         // Poll until we get the assistant's response
         let pollAttempts = 0;
         const maxPollAttempts = 30; // Max 30 attempts (30 seconds)
-        
+
         const pollForAssistantResponse = async () => {
           pollAttempts++;
-          
+
           try {
             const res = await fetch('/api/chat/history', { cache: 'no-store' });
             if (res.ok) {
               const data = await res.json();
               const currentMessages = toBubbles(data);
-              
+
               // Check if the last message is from assistant and contains our user message
               const lastMessage = currentMessages[currentMessages.length - 1];
               const hasUserMessage = currentMessages.some(msg => msg.text === trimmed && msg.role === 'user');
               const hasAssistantResponse = lastMessage?.role === 'assistant' && hasUserMessage;
-              
+
               if (hasAssistantResponse) {
                 // We got the assistant response, update messages and stop loading
                 setMessages(currentMessages);
@@ -175,7 +175,7 @@ export default function Page() {
           } catch (err) {
             console.error('Error polling for response:', err);
           }
-          
+
           // Continue polling if we haven't exceeded max attempts
           if (pollAttempts < maxPollAttempts) {
             setTimeout(pollForAssistantResponse, 1000); // Poll every second
@@ -185,7 +185,7 @@ export default function Page() {
             await loadHistory();
           }
         };
-        
+
         // Start polling after a brief delay
         setTimeout(pollForAssistantResponse, 1000);
       }
