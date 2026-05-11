@@ -4,7 +4,7 @@ from html import escape
 from pathlib import Path
 from typing import Dict, List
 
-from ...services.execution import get_agent_roster
+from ...services.memory import MemorySearchResult, get_memory_store
 
 _prompt_path = Path(__file__).parent / "system_prompt.md"
 SYSTEM_PROMPT = _prompt_path.read_text(encoding="utf-8").strip()
@@ -16,7 +16,7 @@ def build_system_prompt() -> str:
     return SYSTEM_PROMPT
 
 
-# Build structured message with conversation history, active agents, and current turn
+# Build structured message with conversation history, relevant memories, and current turn
 def prepare_message_with_history(
     latest_text: str,
     transcript: str,
@@ -26,7 +26,7 @@ def prepare_message_with_history(
     sections: List[str] = []
 
     sections.append(_render_conversation_history(transcript))
-    sections.append(f"<active_agents>\n{_render_active_agents()}\n</active_agents>")
+    sections.append(f"<relevant_memories>\n{_render_relevant_memories(latest_text)}\n</relevant_memories>")
     sections.append(_render_current_turn(latest_text, message_type))
 
     content = "\n\n".join(sections)
@@ -41,21 +41,66 @@ def _render_conversation_history(transcript: str) -> str:
     return f"<conversation_history>\n{history}\n</conversation_history>"
 
 
-# Format currently active execution agents into XML tags for LLM awareness
-def _render_active_agents() -> str:
-    roster = get_agent_roster()
-    roster.load()
-    agents = roster.get_agents()
+# Format relevant memories into XML tags for LLM awareness
+def _render_relevant_memories(query: str) -> str:
+    memories = get_memory_store().search(query, limit=8, context="prompt_context")
 
-    if not agents:
+    if not memories:
         return "None"
 
     rendered: List[str] = []
-    for agent_name in agents:
-        name = escape(agent_name or "agent", quote=True)
-        rendered.append(f'<agent name="{name}" />')
+    for rank, result in enumerate(memories, start=1):
+        rendered.append(_render_memory_result(result, rank))
 
     return "\n".join(rendered)
+
+
+def _render_memory_result(result: MemorySearchResult, rank: int) -> str:
+    memory = result.memory
+    memory_id = escape(memory.memory_id, quote=True)
+    kind = escape(memory.kind, quote=True)
+    title = escape(memory.title, quote=False)
+    summary = escape(memory.summary or "None", quote=False)
+    reason = escape(result.reason, quote=True)
+    confidence = escape(result.confidence, quote=True)
+    links = "\n".join(_render_memory_link(link.kind, link.value) for link in memory.links[:8])
+    if not links:
+        links = "None"
+    events = "\n".join(
+        (
+            f'<event type="{escape(event.type, quote=True)}" '
+            f'timestamp="{escape(event.timestamp or event.recorded_at, quote=True)}">'
+            f"{escape(event.text, quote=False)}</event>"
+        )
+        for event in memory.recent_events[-5:]
+    )
+    if not events:
+        events = "None"
+    return "\n".join(
+        [
+            (
+                f'<memory id="{memory_id}" kind="{kind}" rank="{rank}" '
+                f'score="{result.score:.2f}" confidence="{confidence}" reason="{reason}">'
+            ),
+            f"<title>{title}</title>",
+            f"<summary>{summary}</summary>",
+            f"<links>\n{links}\n</links>",
+            f"<recent_events>\n{events}\n</recent_events>",
+            "</memory>",
+        ]
+    )
+
+
+def _render_memory_link(kind: str, value: str) -> str:
+    safe_value = escape(value, quote=True)
+    if kind == "gmail_thread":
+        return f'<gmail_thread id="{safe_value}" />'
+    if kind == "gmail_message":
+        return f'<gmail_message id="{safe_value}" />'
+    if kind == "email_address":
+        return f'<email value="{safe_value}" />'
+    safe_kind = escape(kind, quote=True)
+    return f'<link kind="{safe_kind}" value="{safe_value}" />'
 
 
 # Wrap the current message in appropriate XML tags based on sender type

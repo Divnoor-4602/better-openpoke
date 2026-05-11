@@ -4,12 +4,12 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
+from ...config import get_settings
+from ...logging_config import logger
+from ...openrouter_client import request_chat_completion
+from ...services.conversation import get_conversation_log, get_working_memory_log
 from .agent import build_system_prompt, prepare_message_with_history
 from .tools import ToolResult, get_tool_schemas, handle_tool_call
-from ...config import get_settings
-from ...services.conversation import get_conversation_log, get_working_memory_log
-from ...openrouter_client import request_chat_completion
-from ...logging_config import logger
 
 
 @dataclass
@@ -89,7 +89,7 @@ class InteractionAgentRuntime:
             )
 
         except Exception as exc:
-            logger.error("Interaction agent failed", extra={"error": str(exc)})
+            logger.exception(f"Interaction agent failed: {exc}")
             return InteractionResult(
                 success=False,
                 response="",
@@ -124,7 +124,7 @@ class InteractionAgentRuntime:
             )
 
         except Exception as exc:
-            logger.error("Interaction agent (agent message) failed", extra={"error": str(exc)})
+            logger.exception(f"Interaction agent (agent message) failed: {exc}")
             return InteractionResult(
                 success=False,
                 response="",
@@ -167,9 +167,9 @@ class InteractionAgentRuntime:
                 summary.tool_names.append(tool_call.name)
 
                 if tool_call.name == "send_message_to_agent":
-                    agent_name = tool_call.arguments.get("agent_name")
-                    if isinstance(agent_name, str) and agent_name:
-                        summary.execution_agents.add(agent_name)
+                    memory_id = tool_call.arguments.get("memory_id")
+                    if isinstance(memory_id, str) and memory_id:
+                        summary.execution_agents.add(memory_id)
 
                 result = self._execute_tool(tool_call)
 
@@ -229,7 +229,9 @@ class InteractionAgentRuntime:
         return message
 
     # Convert raw LLM tool calls into structured _ToolCall objects with validation
-    def _parse_tool_calls(self, raw_tool_calls: List[Dict[str, Any]]) -> List[_ToolCall]:
+    def _parse_tool_calls(
+        self, raw_tool_calls: List[Dict[str, Any]]
+    ) -> List[_ToolCall]:
         """Normalize tool call payloads from the LLM."""
 
         parsed: List[_ToolCall] = []
@@ -240,9 +242,13 @@ class InteractionAgentRuntime:
                 logger.warning("Skipping tool call without name", extra={"tool": raw})
                 continue
 
-            arguments, error = self._parse_tool_arguments(function_block.get("arguments"))
+            arguments, error = self._parse_tool_arguments(
+                function_block.get("arguments")
+            )
             if error:
-                logger.warning("Tool call arguments invalid", extra={"tool": name, "error": error})
+                logger.warning(
+                    "Tool call arguments invalid", extra={"tool": name, "error": error}
+                )
                 parsed.append(
                     _ToolCall(
                         identifier=raw.get("id"),
@@ -289,7 +295,9 @@ class InteractionAgentRuntime:
 
         if "__invalid_arguments__" in tool_call.arguments:
             error = tool_call.arguments["__invalid_arguments__"]
-            self._log_tool_invocation(tool_call, stage="rejected", detail={"error": error})
+            self._log_tool_invocation(
+                tool_call, stage="rejected", detail={"error": error}
+            )
             return ToolResult(success=False, payload={"error": error})
 
         try:

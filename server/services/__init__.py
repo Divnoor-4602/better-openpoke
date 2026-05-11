@@ -20,6 +20,7 @@ from .gmail import (
     get_important_email_watcher,
     initiate_connect,
 )
+from .memory import MemoryStore, get_memory_store
 from .trigger_scheduler import get_trigger_scheduler
 from .triggers import get_trigger_service
 from .timezone_store import TimezoneStore, get_timezone_store
@@ -45,6 +46,8 @@ __all__ = [
     "get_active_gmail_user_id",
     "get_important_email_watcher",
     "initiate_connect",
+    "MemoryStore",
+    "get_memory_store",
     "get_trigger_scheduler",
     "get_trigger_service",
     "TimezoneStore",

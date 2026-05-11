@@ -36,6 +36,8 @@ class ExecutionAgent:
     def __init__(
         self,
         name: str,
+        display_name: Optional[str] = None,
+        memory_context: str = "",
         conversation_limit: Optional[int] = None
     ):
         """
@@ -46,18 +48,23 @@ class ExecutionAgent:
             conversation_limit: Optional limit on past conversations to include (None = all)
         """
         self.name = name
+        self.display_name = display_name or name
+        self.memory_context = memory_context
         self.conversation_limit = conversation_limit
         self._log_store = get_execution_agent_logs()
 
     # Generate system prompt template with agent name and purpose derived from name
     def build_system_prompt(self) -> str:
         """Build the system prompt for this agent."""
-        agent_purpose = f"Handle tasks related to: {self.name}"
+        agent_purpose = f"Handle tasks related to: {self.display_name}"
 
-        return SYSTEM_PROMPT_TEMPLATE.format(
-            agent_name=self.name,
+        prompt = SYSTEM_PROMPT_TEMPLATE.format(
+            agent_name=self.display_name,
             agent_purpose=agent_purpose
         )
+        if self.memory_context.strip():
+            return f"{prompt}\n\n# Memory Context\n\n{self.memory_context}"
+        return prompt
 
     # Combine base system prompt with conversation history, applying conversation limits
     def build_system_prompt_with_history(self) -> str:

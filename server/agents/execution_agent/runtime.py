@@ -2,12 +2,14 @@
 
 import inspect
 import json
+import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from ...config import get_settings
 from ...logging_config import logger
 from ...openrouter_client import request_chat_completion
+from ...services.memory import get_memory_store
 from .agent import ExecutionAgent
 from .tools import get_tool_registry, get_tool_schemas
 
@@ -16,6 +18,8 @@ from .tools import get_tool_registry, get_tool_schemas
 class ExecutionResult:
     """Result from an execution agent."""
 
+    memory_id: str
+    memory_title: str
     agent_name: str
     success: bool
     response: str
@@ -29,9 +33,23 @@ class ExecutionAgentRuntime:
     MAX_TOOL_ITERATIONS = 8
 
     # Initialize execution agent runtime with settings, tools, and agent instance
-    def __init__(self, agent_name: str):
+    def __init__(
+        self,
+        agent_name: str,
+        memory_title: Optional[str] = None,
+        run_id: Optional[str] = None,
+    ):
         settings = get_settings()
-        self.agent = ExecutionAgent(agent_name)
+        self.memory_id = agent_name
+        self.memory_title = memory_title or agent_name
+        self.run_id = run_id or str(uuid.uuid4())
+        self.memory_store = get_memory_store()
+        memory_context = self.memory_store.render_memory_context(self.memory_id)
+        self.agent = ExecutionAgent(
+            agent_name,
+            display_name=self.memory_title,
+            memory_context=memory_context,
+        )
         self.api_key = settings.openrouter_api_key
         self.model = settings.execution_agent_model
         self.tool_registry = get_tool_registry(agent_name=agent_name)
@@ -105,6 +123,18 @@ class ExecutionAgentRuntime:
 
                     tools_executed.append(tool_name)
                     logger.info(f"[{self.agent.name}] Executing tool: {tool_name}")
+                    should_record_tool_memory = self._should_record_tool_memory(
+                        tool_name
+                    )
+                    if should_record_tool_memory:
+                        self.memory_store.record_event(
+                            type="tool_call",
+                            text=f"Calling {tool_name}",
+                            memory_id=self.memory_id,
+                            idempotency_key=f"tool_call:{self.run_id}:{call_id or tool_name}",
+                            source="execution_agent",
+                            metadata={"tool_name": tool_name, "arguments": tool_args},
+                        )
 
                     success, result = await self._execute_tool(tool_name, tool_args)
 
@@ -127,6 +157,19 @@ class ExecutionAgentRuntime:
                     self.agent.record_tool_execution(
                         tool_name, self._safe_json_dump(tool_args), record_payload
                     )
+                    if should_record_tool_memory:
+                        self.memory_store.record_event(
+                            type="tool_result",
+                            text=f"{tool_name}: {record_payload[:500]}",
+                            memory_id=self.memory_id,
+                            idempotency_key=f"tool_result:{self.run_id}:{call_id or tool_name}",
+                            source="execution_agent",
+                            metadata={
+                                "tool_name": tool_name,
+                                "success": success,
+                                "result": result,
+                            },
+                        )
 
                     tool_message = {
                         "role": "tool",
@@ -146,8 +189,17 @@ class ExecutionAgentRuntime:
                 raise RuntimeError("LLM did not return a final response")
 
             self.agent.record_response(final_response)
+            self.memory_store.record_event(
+                type="execution_response",
+                text=final_response,
+                memory_id=self.memory_id,
+                idempotency_key=f"execution_response:{self.run_id}",
+                source="execution_agent",
+            )
 
             return ExecutionResult(
+                memory_id=self.memory_id,
+                memory_title=self.memory_title,
                 agent_name=self.agent.name,
                 success=True,
                 response=final_response,
@@ -159,8 +211,18 @@ class ExecutionAgentRuntime:
             error_msg = str(e)
             failure_text = f"Failed to complete task: {error_msg}"
             self.agent.record_response(f"Error: {error_msg}")
+            self.memory_store.record_event(
+                type="execution_response",
+                text=f"Error: {error_msg}",
+                memory_id=self.memory_id,
+                idempotency_key=f"execution_response:{self.run_id}",
+                source="execution_agent",
+                metadata={"error": error_msg},
+            )
 
             return ExecutionResult(
+                memory_id=self.memory_id,
+                memory_title=self.memory_title,
                 agent_name=self.agent.name,
                 success=False,
                 response=failure_text,
@@ -220,6 +282,13 @@ class ExecutionAgentRuntime:
             return json.dumps(payload, default=str)
         except TypeError:
             return str(payload)
+
+    def _should_record_tool_memory(self, tool_name: str) -> bool:
+        """Return whether a tool call/result is meaningful memory."""
+        retrieval_only_tools = {
+            "task_email_search",
+        }
+        return tool_name not in retrieval_only_tools
 
     # Format tool execution results into JSON structure for LLM consumption
     def _format_tool_result(
