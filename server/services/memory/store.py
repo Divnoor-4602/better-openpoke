@@ -109,6 +109,7 @@ class MemoryStore:
             )
             for link in normalized_links:
                 self._insert_link(conn, memory_id, None, link, timestamp)
+            self._enqueue_index(conn, "memory", memory_id, "upsert", timestamp)
             conn.commit()
 
         return self.get_memory(memory_id)  # type: ignore[return-value]
@@ -162,6 +163,7 @@ class MemoryStore:
                     memory_id,
                 ),
             )
+            self._enqueue_index(conn, "memory", memory_id, "upsert", timestamp)
             conn.commit()
             row = conn.execute(
                 "SELECT * FROM memories WHERE memory_id = ?",
@@ -298,8 +300,10 @@ class MemoryStore:
                     "UPDATE memories SET updated_at = ? WHERE memory_id = ?",
                     (recorded_at, resolved_memory_id),
                 )
+                self._enqueue_index(conn, "memory", resolved_memory_id, "upsert", recorded_at)
             for link in normalized_links:
                 self._insert_link(conn, resolved_memory_id, event_id, link, recorded_at)
+            self._enqueue_index(conn, "event", event_id, "upsert", recorded_at)
             conn.commit()
             return self._event_from_row(
                 conn,
@@ -323,9 +327,59 @@ class MemoryStore:
                 "UPDATE memories SET updated_at = ? WHERE memory_id = ?",
                 (timestamp, memory_id),
             )
+            self._enqueue_index(conn, "memory", memory_id, "upsert", timestamp)
+            if event_id:
+                self._enqueue_index(conn, "event", event_id, "upsert", timestamp)
             conn.commit()
 
     def search(
+        self,
+        query: str,
+        *,
+        limit: int = 8,
+        context: str = "memory_search",
+    ) -> list[MemorySearchResult]:
+        from .indexer import MemoryIndexer, pinecone_enabled
+        from .hybrid_search import hybrid_candidates
+        from .ranking import PromptContextRanker, SearchResultRanker
+        from .rerank import rerank_candidates
+
+        if pinecone_enabled():
+            try:
+                MemoryIndexer(self._db_path).sync_pending(limit=25)
+                candidates = hybrid_candidates(self._db_path, query, top_k=60)
+                if candidates:
+                    ranked_candidates = rerank_candidates(
+                        query,
+                        candidates,
+                        limit=max(limit, 1),
+                    )
+                    ranker = (
+                        PromptContextRanker(self)
+                        if context == "prompt_context"
+                        else SearchResultRanker(self)
+                    )
+                    results = ranker.rank(ranked_candidates, limit=limit)
+                    if results:
+                        logger.info(
+                            "Hybrid memory ranking completed",
+                            extra={
+                                "context": context,
+                                "query": query,
+                                "returned": len(results),
+                                "backend": "pinecone_hybrid",
+                            },
+                        )
+                        return results
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                logger.warning(
+                    "Hybrid memory search unavailable; falling back to lexical search",
+                    extra={"context": context, "error": str(exc)},
+                )
+
+        return self._search_lexical(query, limit=limit, context=context)
+
+    def _search_lexical(
         self,
         query: str,
         *,
@@ -433,7 +487,13 @@ class MemoryStore:
             )
             return results
 
-    def render_memory_context(self, memory_id: str, *, event_limit: int = 12) -> str:
+    def render_memory_context(
+        self,
+        memory_id: str,
+        *,
+        query: Optional[str] = None,
+        event_limit: int = 12,
+    ) -> str:
         memory = self.get_memory(memory_id)
         if memory is None:
             return ""
@@ -442,10 +502,11 @@ class MemoryStore:
             "\n".join(f"- {link.kind}: {link.value}" for link in memory.links[:20])
             or "None"
         )
+        selected_events = self._rank_memory_events(memory, query, event_limit)
         events = (
             "\n".join(
                 f"- [{event.timestamp or event.recorded_at}] {event.type}: {event.text}"
-                for event in memory.recent_events[-event_limit:]
+                for event in selected_events
             )
             or "None"
         )
@@ -462,8 +523,42 @@ class MemoryStore:
             ]
         )
 
+    def _rank_memory_events(
+        self,
+        memory: MemoryRecord,
+        query: Optional[str],
+        event_limit: int,
+    ) -> list[MemoryEvent]:
+        if not query:
+            return memory.recent_events[-event_limit:]
+        terms = self._tokens(query)
+        if not terms:
+            return memory.recent_events[-event_limit:]
+        scored: list[tuple[float, int, MemoryEvent]] = []
+        for index, event in enumerate(memory.recent_events):
+            score = len(terms & self._tokens(event.text)) * 10
+            score += len(terms & self._tokens(self._dump_json(event.metadata))) * 5
+            scored.append((float(score), index, event))
+        relevant = [item for item in scored if item[0] > 0]
+        latest = scored[-min(3, len(scored)) :]
+        merged: dict[str, tuple[float, int, MemoryEvent]] = {
+            item[2].event_id: item
+            for item in sorted(relevant, key=lambda item: item[0], reverse=True)[
+                :event_limit
+            ]
+        }
+        for item in latest:
+            merged.setdefault(item[2].event_id, item)
+        selected = sorted(
+            merged.values(),
+            key=lambda item: (item[0], item[1]),
+            reverse=True,
+        )[:event_limit]
+        return [item[2] for item in sorted(selected, key=lambda item: item[1])]
+
     def clear_all(self) -> None:
         with self._connect() as conn:
+            conn.execute("DELETE FROM memory_index_queue")
             conn.execute("DELETE FROM links")
             conn.execute("DELETE FROM events")
             conn.execute("DELETE FROM memories")
@@ -509,11 +604,28 @@ class MemoryStore:
                     FOREIGN KEY(event_id) REFERENCES events(event_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS memory_index_queue (
+                    id TEXT PRIMARY KEY,
+                    entity_type TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_events_memory_id ON events(memory_id);
                 CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
                 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_links_kind_value ON links(kind, value);
                 CREATE INDEX IF NOT EXISTS idx_links_memory_id ON links(memory_id);
+                CREATE INDEX IF NOT EXISTS idx_memory_index_queue_status
+                    ON memory_index_queue(status, created_at);
+                CREATE INDEX IF NOT EXISTS idx_memory_index_queue_entity
+                    ON memory_index_queue(entity_type, entity_id);
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_events_idempotency_key
                     ON events(idempotency_key);
                 """
@@ -620,6 +732,35 @@ class MemoryStore:
                 link.value,
                 link.label,
                 created_at,
+            ),
+        )
+
+    def _enqueue_index(
+        self,
+        conn: sqlite3.Connection,
+        entity_type: str,
+        entity_id: Optional[str],
+        operation: str,
+        version: str,
+    ) -> None:
+        if not entity_id:
+            return
+        timestamp = self._now()
+        conn.execute(
+            """
+            INSERT INTO memory_index_queue (
+                id, entity_type, entity_id, operation, version, status,
+                attempts, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+            """,
+            (
+                self._new_id("idx"),
+                entity_type,
+                entity_id,
+                operation,
+                version,
+                timestamp,
+                timestamp,
             ),
         )
 

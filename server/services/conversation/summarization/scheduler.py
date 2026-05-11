@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from importlib import import_module
 
 from ....logging_config import logger
-from .summarizer import summarize_conversation
 
 _pending = False
 _running = False
@@ -33,6 +33,9 @@ async def _run_worker() -> None:
         while _pending:
             _pending = False
             try:
+                summarize_conversation = import_module(
+                    "server.services.conversation.summarization.summarizer"
+                ).summarize_conversation
                 await summarize_conversation()
             except Exception as exc:  # pragma: no cover - defensive
                 logger.error(

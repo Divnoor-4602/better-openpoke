@@ -10,7 +10,6 @@ from ...logging_config import logger
 from ...services.conversation import get_conversation_log
 from ...services.execution import get_execution_agent_logs
 from ...services.memory import MemorySearchResult, get_memory_store
-from ..execution_agent.batch_manager import ExecutionBatchManager
 
 
 @dataclass
@@ -133,7 +132,16 @@ TOOL_SCHEMAS = [
     },
 ]
 
-_EXECUTION_BATCH_MANAGER = ExecutionBatchManager()
+_execution_batch_manager: Any = None
+
+
+def _get_execution_batch_manager() -> Any:
+    global _execution_batch_manager
+    if _execution_batch_manager is None:
+        from ..execution_agent.batch_manager import ExecutionBatchManager
+
+        _execution_batch_manager = ExecutionBatchManager()
+    return _execution_batch_manager
 
 
 # Create or reuse memory context and dispatch instructions asynchronously
@@ -180,7 +188,7 @@ def send_message_to_agent(
 
     async def _execute_async() -> None:
         try:
-            result = await _EXECUTION_BATCH_MANAGER.execute_agent(
+            result = await _get_execution_batch_manager().execute_agent(
                 memory.memory_id,
                 instructions,
                 memory_title=memory.title,
@@ -332,12 +340,23 @@ def _serialize_memory_result(result: MemorySearchResult) -> dict[str, Any]:
         "score": result.score,
         "confidence": result.confidence,
         "reason": result.reason,
+        "ranking_reason": result.reason,
         "links": [
             {"kind": link.kind, "value": link.value, "label": link.label}
             for link in memory.links[:12]
         ],
+        "matched_events": [
+            {
+                "event_id": event.event_id,
+                "type": event.type,
+                "timestamp": event.timestamp or event.recorded_at,
+                "text": event.text,
+            }
+            for event in memory.recent_events[:3]
+        ],
         "recent_events": [
             {
+                "event_id": event.event_id,
                 "type": event.type,
                 "timestamp": event.timestamp or event.recorded_at,
                 "text": event.text,

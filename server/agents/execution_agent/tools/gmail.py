@@ -7,7 +7,7 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional
 
 from server.services.execution import get_execution_agent_logs
-from server.services.gmail import execute_gmail_tool, get_active_gmail_user_id
+from server.services.gmail.client import execute_gmail_tool, get_active_gmail_user_id
 from server.services.memory import record_gmail_tool_result
 
 _GMAIL_AGENT_NAME = "gmail-execution-agent"

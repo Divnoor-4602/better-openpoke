@@ -62,6 +62,12 @@ class Settings(BaseModel):
     composio_gmail_auth_config_id: Optional[str] = Field(default=os.getenv("COMPOSIO_GMAIL_AUTH_CONFIG_ID"))
     composio_api_key: Optional[str] = Field(default=os.getenv("COMPOSIO_API_KEY"))
 
+    # Derived memory search infrastructure. SQLite remains the source of truth.
+    pinecone_api_key: Optional[str] = Field(default=os.getenv("PINECONE_API_KEY"))
+    pinecone_index_host: Optional[str] = Field(default=os.getenv("PINECONE_INDEX_HOST"))
+    pinecone_namespace: str = Field(default=os.getenv("PINECONE_NAMESPACE", "openpoke"))
+    memory_search_backend: str = Field(default=os.getenv("MEMORY_SEARCH_BACKEND", "pinecone_hybrid"))
+
     # HTTP behaviour
     cors_allow_origins_raw: str = Field(default=os.getenv("OPENPOKE_CORS_ALLOW_ORIGINS", "*"))
     enable_docs: bool = Field(default=os.getenv("OPENPOKE_ENABLE_DOCS", "1") != "0")

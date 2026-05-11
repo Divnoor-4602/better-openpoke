@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from server.services.gmail import execute_gmail_tool, get_active_gmail_user_id
+from server.services.gmail.client import execute_gmail_tool, get_active_gmail_user_id
 
 # Schema for the internal LLM to call gmail_fetch_emails
 GMAIL_FETCH_EMAILS_SCHEMA = {
@@ -70,7 +70,7 @@ def gmail_fetch_emails(
         return {"error": "Gmail not connected. Please connect Gmail in settings first."}
     
     # Use the same composio integration as the public tools
-    return execute_gmail_tool("GMAIL_FETCH_EMAILS", composio_user_id, arguments)
+    return execute_gmail_tool("GMAIL_FETCH_EMAILS", composio_user_id, arguments=arguments)
 
 
 __all__ = [

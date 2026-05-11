@@ -83,7 +83,7 @@ def record_gmail_message(
     """Record one compact Gmail message event and its thread/message links."""
     memory_store = store or get_memory_store()
 
-    preview = message.get("preview") if isinstance(message.get("preview"), dict) else {}
+    preview = _dict_value(message.get("preview"))
     message_id = _first_str(message.get("messageId"), message.get("id"))
     thread_id = _first_str(message.get("threadId"), message.get("thread_id"))
     timestamp = _first_str(message.get("messageTimestamp"))
@@ -168,7 +168,7 @@ def _record_gmail_action(
     memory_id: Optional[str],
     store: MemoryStore,
 ) -> Optional[MemoryRecord]:
-    payload = result.get("data") if isinstance(result.get("data"), dict) else result
+    payload = _dict_value(result.get("data")) or result
     args = arguments or {}
     thread_id = _find_key(payload, "threadId", "thread_id", "thread_id")
     if type == "gmail_draft_created":
@@ -190,7 +190,9 @@ def _record_gmail_action(
     )
     draft_context = _find_draft_context(store, draft_id) if draft_id else {}
     subject = _first_str(subject, draft_context.get("subject"))
-    recipient = _first_str(recipient, draft_context.get("recipient_email"), draft_context.get("to"))
+    recipient = _first_str(
+        recipient, draft_context.get("recipient_email"), draft_context.get("to")
+    )
     thread_id = _first_str(thread_id, draft_context.get("thread_id"))
     links = _compact_links(
         [
@@ -277,15 +279,21 @@ def _find_draft_context(store: MemoryStore, draft_id: str) -> dict[str, Any]:
     arguments = draft_event.metadata.get("arguments")
     if isinstance(arguments, dict):
         return {
-            "recipient_email": _first_str(arguments.get("recipient_email"), arguments.get("to")),
+            "recipient_email": _first_str(
+                arguments.get("recipient_email"), arguments.get("to")
+            ),
             "subject": _first_str(arguments.get("subject")),
-            "thread_id": _first_str(arguments.get("thread_id"), arguments.get("threadId")),
+            "thread_id": _first_str(
+                arguments.get("thread_id"), arguments.get("threadId")
+            ),
         }
 
     result = draft_event.metadata.get("result")
     if isinstance(result, dict):
         return {
-            "recipient_email": _first_str(result.get("recipient_email"), result.get("to")),
+            "recipient_email": _first_str(
+                result.get("recipient_email"), result.get("to")
+            ),
             "subject": _first_str(result.get("subject")),
             "thread_id": _first_str(result.get("thread_id"), result.get("threadId")),
         }
@@ -332,7 +340,7 @@ def _gmail_action_summary(
 
 
 def _extract_messages(result: dict[str, Any]) -> list[dict[str, Any]]:
-    data = result.get("data") if isinstance(result.get("data"), dict) else result
+    data = _dict_value(result.get("data")) or result
     messages = data.get("messages") if isinstance(data, dict) else None
     if isinstance(messages, list):
         return [message for message in messages if isinstance(message, dict)]
@@ -375,6 +383,10 @@ def _first_str(*values: Any) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _dict_value(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _find_key(payload: Any, *keys: str) -> str:

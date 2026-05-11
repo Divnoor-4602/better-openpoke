@@ -81,7 +81,8 @@ class EmailTextCleaner:
                     )
 
             for link in soup.find_all("a"):
-                href = link.get("href", "")
+                raw_href = link.get("href", "")
+                href = raw_href if isinstance(raw_href, str) else ""
                 text = link.get_text(strip=True)
 
                 if href:

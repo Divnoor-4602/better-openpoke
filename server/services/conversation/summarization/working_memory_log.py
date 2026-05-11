@@ -35,7 +35,7 @@ def _format_line(tag: str, payload: str, timestamp: Optional[str] = None) -> str
 
 
 def _current_timestamp() -> str:
-    return now_in_user_timezone("%Y-%m-%d %H:%M:%S")
+    return str(now_in_user_timezone("%Y-%m-%d %H:%M:%S"))
 
 
 class WorkingMemoryLog:

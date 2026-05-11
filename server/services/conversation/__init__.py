@@ -1,7 +1,28 @@
 """Conversation-related service helpers."""
 
-from .log import ConversationLog, get_conversation_log
-from .summarization import SummaryState, get_working_memory_log, schedule_summarization
+from __future__ import annotations
+
+from importlib import import_module
+from typing import Any
+
+_EXPORTS = {
+    "ConversationLog": (".log", "ConversationLog"),
+    "get_conversation_log": (".log", "get_conversation_log"),
+    "SummaryState": (".summarization.state", "SummaryState"),
+    "get_working_memory_log": (
+        ".summarization.working_memory_log",
+        "get_working_memory_log",
+    ),
+    "schedule_summarization": (".summarization.scheduler", "schedule_summarization"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _EXPORTS:
+        raise AttributeError(name)
+    module_name, attr_name = _EXPORTS[name]
+    module = import_module(module_name, __name__)
+    return getattr(module, attr_name)
 
 __all__ = [
     "ConversationLog",

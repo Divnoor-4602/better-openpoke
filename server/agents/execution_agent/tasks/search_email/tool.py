@@ -10,11 +10,10 @@ from server.config import get_settings
 from server.logging_config import logger
 from server.openrouter_client import request_chat_completion
 from server.services.execution import get_execution_agent_logs
-from server.services.gmail import (
+from server.services.gmail.client import execute_gmail_tool, get_active_gmail_user_id
+from server.services.gmail.processing import (
     EmailTextCleaner,
     ProcessedEmail,
-    execute_gmail_tool,
-    get_active_gmail_user_id,
     parse_gmail_fetch_response,
 )
 
@@ -116,6 +115,9 @@ async def task_email_search(search_query: str, memory_id: Optional[str] = None) 
     if not api_key:
         logger.error(f"[EMAIL_SEARCH] OpenRouter not configured: {model_or_error}")
         return {"error": model_or_error}
+    if model_or_error is None:
+        logger.error("[EMAIL_SEARCH] OpenRouter model not configured")
+        return {"error": ERROR_OPENROUTER_NOT_CONFIGURED}
 
     try:
         result = await _run_email_search(

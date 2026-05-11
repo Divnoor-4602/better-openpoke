@@ -4,16 +4,15 @@ import re
 import threading
 from html import escape, unescape
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Protocol, Tuple
+from typing import Dict, Iterator, List, Optional, Protocol, TYPE_CHECKING, Tuple
 
 from ...config import get_settings
 from ...logging_config import logger
 from ...models import ChatMessage
 from ...utils.timezones import now_in_user_timezone
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - used for type checkers only
-    from .summarization import WorkingMemoryLog
+    from .summarization.working_memory_log import WorkingMemoryLog
 
 
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
@@ -41,7 +40,7 @@ def _default_formatter(tag: str, timestamp: str, payload: str) -> str:
 
 
 def _resolve_working_memory_log() -> "WorkingMemoryLog":
-    from .summarization import get_working_memory_log
+    from .summarization.working_memory_log import get_working_memory_log
 
     return get_working_memory_log()
 
@@ -66,7 +65,7 @@ class ConversationLog:
             logger.warning("conversation log directory creation failed", extra={"error": str(exc)})
 
     def _append(self, tag: str, payload: str) -> str:
-        timestamp = now_in_user_timezone("%Y-%m-%d %H:%M:%S")
+        timestamp = str(now_in_user_timezone("%Y-%m-%d %H:%M:%S"))
         entry = self._formatter(tag, timestamp, str(payload))
         with self._lock:
             try:
@@ -156,7 +155,7 @@ class ConversationLog:
             return
 
         try:
-            from .summarization import schedule_summarization  # type: ignore import-not-found
+            from .summarization.scheduler import schedule_summarization
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug(
                 "summarization scheduler unavailable",

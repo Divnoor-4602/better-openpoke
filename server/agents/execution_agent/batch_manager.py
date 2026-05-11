@@ -204,7 +204,10 @@ class ExecutionBatchManager:
     async def _dispatch_to_interaction_agent(self, payload: str) -> None:
         """Send the aggregated execution summary to the interaction agent."""
 
-        from ..interaction_agent.runtime import InteractionAgentRuntime
+        from importlib import import_module
+
+        module = import_module("server.agents.interaction_agent.runtime")
+        InteractionAgentRuntime = module.InteractionAgentRuntime
 
         runtime = InteractionAgentRuntime()
         try:

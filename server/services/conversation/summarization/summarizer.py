@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from importlib import import_module
 from typing import List, Optional, TYPE_CHECKING
 
 from ....config import get_settings
@@ -15,9 +16,8 @@ if TYPE_CHECKING:  # pragma: no cover - type checking only
 
 
 def _resolve_conversation_log() -> "ConversationLog":
-    from ..log import get_conversation_log
-
-    return get_conversation_log()
+    module = import_module("server.services.conversation.log")
+    return module.get_conversation_log()
 
 
 def _collect_entries(log) -> List[LogEntry]:
