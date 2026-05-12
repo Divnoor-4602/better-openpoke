@@ -8,17 +8,19 @@ from pathlib import Path
 from ...config import get_settings
 from ...logging_config import logger
 from .indexer import MemoryIndexer, pinecone_enabled
-from .store import _MEMORY_DB_PATH
+
+_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+_MEMORY_DB_PATH = _DATA_DIR / "memory.db"
 
 
 class MemoryIndexWorker:
     """Runs Pinecone indexing outside request/agent business logic."""
 
     def __init__(self, db_path: Path = _MEMORY_DB_PATH) -> None:
-        self._db_path = db_path
+        self._db_path: Path = db_path
         self._tasks: list[asyncio.Task[None]] = []
-        self._running = False
-        self._lock = asyncio.Lock()
+        self._running: bool = False
+        self._lock: asyncio.Lock = asyncio.Lock()
 
     async def start(self) -> None:
         async with self._lock:
@@ -51,7 +53,7 @@ class MemoryIndexWorker:
             tasks = self._tasks
             self._tasks = []
             for task in tasks:
-                task.cancel()
+                _ = task.cancel()
             for task in tasks:
                 try:
                     await task

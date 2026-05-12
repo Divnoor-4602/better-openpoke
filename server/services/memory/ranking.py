@@ -59,7 +59,9 @@ class _MemorySearchResult(Protocol):
 
 
 class _MemoryStore(Protocol):
-    def get_memories(self, memory_ids: Iterable[str]) -> Mapping[str, _MemoryRecord]: ...
+    def get_memories(
+        self, memory_ids: Iterable[str]
+    ) -> Mapping[str, _MemoryRecord]: ...
 
     def _connect(self) -> sqlite3.Connection: ...
 
@@ -99,7 +101,7 @@ class PromptContextRanker:
     """Group event-level hits by memory for prompt context packing."""
 
     def __init__(self, store: _MemoryStore) -> None:
-        self._store = store
+        self._store: _MemoryStore = store
 
     def rank(
         self,
@@ -114,7 +116,7 @@ class PromptContextRanker:
             existing = grouped.get(candidate.memory_id)
             if existing is None or candidate.sort_score > existing.sort_score:
                 grouped[candidate.memory_id] = candidate
-            elif existing is not None:
+            else:
                 existing.reason_parts.update(candidate.reason_parts)
                 existing.sources.update(candidate.sources)
 
@@ -129,7 +131,7 @@ class SearchResultRanker:
     """Preserve event-level matches while returning memory-compatible results."""
 
     def __init__(self, store: _MemoryStore) -> None:
-        self._store = store
+        self._store: _MemoryStore = store
 
     def rank(
         self,
@@ -153,7 +155,7 @@ def _results_from_candidates(
 
     results: list[_MemorySearchResult] = []
     seen_memory_ids: set[str] = set()
-    candidate_memory_ids = []
+    candidate_memory_ids: list[str] = []
     for candidate in candidates:
         if candidate.memory_id and candidate.memory_id not in candidate_memory_ids:
             candidate_memory_ids.append(candidate.memory_id)
@@ -193,14 +195,19 @@ def _memory_with_matched_event_first(
         import_module("server.services.memory.store").MemoryRecord,
     )
 
-    with store._connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM events WHERE event_id = ?",
-            (event_id,),
-        ).fetchone()
+    with store._connect() as conn:  # pyright: ignore[reportPrivateUsage]
+        row = cast(
+            sqlite3.Row | None,
+            conn.execute(
+                "SELECT * FROM events WHERE event_id = ?",
+                (event_id,),
+            ).fetchone(),
+        )
         if row is None:
             return memory
-        event = store._event_from_row(conn, row)
+        event = store._event_from_row(  # pyright: ignore[reportPrivateUsage]
+            conn, row
+        )
     events = [
         event,
         *[

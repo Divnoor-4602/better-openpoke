@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import cast
 
 from ...config import get_settings
 from ...logging_config import logger
-from ...openrouter_client import OpenRouterError, OpenRouterTool, request_chat_completion
+from ...openrouter_client import (
+    OpenRouterError,
+    request_chat_completion,
+)
 from .processing import ProcessedEmail
 
 _TOOL_NAME = "mark_email_importance"
-_TOOL_SCHEMA: OpenRouterTool = {
+_TOOL_SCHEMA: Mapping[str, object] = {
     "type": "function",
     "function": {
         "name": _TOOL_NAME,
@@ -42,6 +46,7 @@ _TOOL_SCHEMA: OpenRouterTool = {
         },
     },
 }
+_TOOL_SCHEMAS: tuple[Mapping[str, object], ...] = (_TOOL_SCHEMA,)
 
 _SYSTEM_PROMPT = (
     "You review incoming Gmail messages and decide whether they warrant an immediate proactive "
@@ -98,7 +103,7 @@ async def classify_email_importance(email: ProcessedEmail) -> str | None:
             messages=messages,
             system=_SYSTEM_PROMPT,
             api_key=api_key,
-            tools=[_TOOL_SCHEMA],
+            tools=_TOOL_SCHEMAS,
         )
     except OpenRouterError as exc:
         logger.error(
@@ -106,7 +111,7 @@ async def classify_email_importance(email: ProcessedEmail) -> str | None:
             extra={"message_id": email.id, "error": str(exc)},
         )
         return None
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception:  # pragma: no cover - defensive
         logger.exception(
             "Unexpected error during importance classification",
             extra={"message_id": email.id},

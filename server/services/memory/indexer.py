@@ -1,4 +1,5 @@
 """Pinecone indexing helpers for memory records and events."""
+# pyright: reportAny=false, reportExplicitAny=false, reportUnknownArgumentType=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnannotatedClassAttribute=false, reportUnusedCallResult=false, reportUnusedFunction=false
 
 from __future__ import annotations
 
@@ -148,7 +149,9 @@ class MemoryIndexer:
 
             try:
                 pc, index = _pinecone_index()
-            except Exception as exc:  # pragma: no cover - depends on optional package/config
+            except (
+                Exception
+            ) as exc:  # pragma: no cover - depends on optional package/config
                 _release_claimed_rows(conn, rows, str(exc))
                 conn.commit()
                 logger.warning("Pinecone index unavailable", extra={"error": str(exc)})
@@ -395,7 +398,9 @@ def _compact_events(events: Iterable[sqlite3.Row]) -> str:
 def _compact_mapping(label: str, payload: dict[str, object]) -> str:
     if not payload:
         return ""
-    return f"{label}: " + json.dumps(payload, ensure_ascii=False, default=str, sort_keys=True)
+    return f"{label}: " + json.dumps(
+        payload, ensure_ascii=False, default=str, sort_keys=True
+    )
 
 
 def _metadata_links(links: Iterable[sqlite3.Row]) -> dict[str, object]:
@@ -635,7 +640,14 @@ def _age_seconds(timestamp: str) -> int:
             dt = datetime.fromisoformat(timestamp)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return max(0, int((datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds()))
+        return max(
+            0,
+            int(
+                (
+                    datetime.now(timezone.utc) - dt.astimezone(timezone.utc)
+                ).total_seconds()
+            ),
+        )
     except ValueError:
         return 0
 

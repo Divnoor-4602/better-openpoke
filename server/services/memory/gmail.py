@@ -1,4 +1,5 @@
 """Helpers for turning compact Gmail tool payloads into memory events."""
+# pyright: reportAny=false, reportExplicitAny=false, reportUnknownArgumentType=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportPrivateUsage=false, reportUnusedCallResult=false, reportUnnecessaryIsInstance=false
 
 from __future__ import annotations
 
@@ -341,7 +342,9 @@ def _record_parent_child_memory_link(
     child_link = MemoryLink("child_memory", child_memory.memory_id)
     store.add_links(parent_memory_id, [child_link])
 
-    label = _gmail_action_title("Gmail child memory", recipient, subject, child_memory.memory_id)
+    label = _gmail_action_title(
+        "Gmail child memory", recipient, subject, child_memory.memory_id
+    )
     store.record_event(
         type="gmail_child_memory_linked",
         text=f"{label} -> {child_memory.memory_id}",

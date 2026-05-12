@@ -82,7 +82,9 @@ def rerank_candidates(
             ranked.append(candidate)
             seen.add(candidate.dedupe_key)
 
-    return sorted(ranked, key=lambda candidate: candidate.sort_score, reverse=True)[:limit]
+    return sorted(ranked, key=lambda candidate: candidate.sort_score, reverse=True)[
+        :limit
+    ]
 
 
 def _fallback_text(candidate: SearchCandidate) -> str:
@@ -100,7 +102,8 @@ def _fallback_text(candidate: SearchCandidate) -> str:
 
 def _rerank_rows(response: object) -> list[object]:
     if isinstance(response, Mapping):
-        data = response.get("data") or []
+        payload = cast(Mapping[object, object], response)
+        data: object = payload.get("data") or []
     else:
         data = getattr(response, "data", []) or []
     return list(cast(Iterable[object], data))
@@ -110,12 +113,13 @@ def _row_index(row: object) -> int | None:
     index = _get(row, "index")
     if index is not None:
         return int(cast(str | int, index))
-    document = _get(row, "document", {}) or {}
+    document: object = _get(row, "document", {}) or {}
     doc_id = _get(document, "id")
     return int(cast(str | int, doc_id)) if str(doc_id).isdigit() else None
 
 
 def _get(value: object, key: str, default: object | None = None) -> object | None:
     if isinstance(value, Mapping):
-        return value.get(key, default)
+        payload = cast(Mapping[object, object], value)
+        return payload.get(key, default)
     return getattr(value, key, default)

@@ -274,7 +274,9 @@ def recent_unindexed_candidates(
             (limit,),
         ).fetchall(),
     )
-    seen = {(_row_text(row, "entity_type"), _row_text(row, "entity_id")) for row in rows}
+    seen = {
+        (_row_text(row, "entity_type"), _row_text(row, "entity_id")) for row in rows
+    }
 
     for entity_type, entity_id in seen:
         if entity_type == "memory":
@@ -319,7 +321,9 @@ def recent_unindexed_candidates(
 
     recent_memory_rows = cast(
         list[sqlite3.Row],
-        conn.execute("SELECT * FROM memories ORDER BY updated_at DESC LIMIT 8").fetchall(),
+        conn.execute(
+            "SELECT * FROM memories ORDER BY updated_at DESC LIMIT 8"
+        ).fetchall(),
     )
     for row in recent_memory_rows:
         candidates.append(

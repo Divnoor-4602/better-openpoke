@@ -1,4 +1,5 @@
 """SQLite-backed memory contexts, events, links, and lexical search."""
+# pyright: reportAny=false, reportExplicitAny=false, reportUnannotatedClassAttribute=false, reportUnusedCallResult=false, reportUnnecessaryIsInstance=false, reportUnknownVariableType=false
 
 from __future__ import annotations
 

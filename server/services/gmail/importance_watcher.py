@@ -7,13 +7,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .client import execute_gmail_tool, get_active_gmail_user_id
-from .processing import EmailTextCleaner, ProcessedEmail, parse_gmail_fetch_response
-from .seen_store import GmailSeenStore
-from .importance_classifier import classify_email_importance
 from ...logging_config import logger
 from ...utils.timezones import convert_to_user_timezone
-
+from .client import execute_gmail_tool, get_active_gmail_user_id
+from .importance_classifier import classify_email_importance
+from .processing import EmailTextCleaner, ProcessedEmail, parse_gmail_fetch_response
+from .seen_store import GmailSeenStore
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ...agents.interaction_agent.runtime import InteractionAgentRuntime
@@ -45,14 +44,16 @@ class ImportantEmailWatcher:
         *,
         seen_store: GmailSeenStore | None = None,
     ) -> None:
-        self._poll_interval = poll_interval_seconds
-        self._lookback_minutes = lookback_minutes
-        self._lock = asyncio.Lock()
+        self._poll_interval: float = poll_interval_seconds
+        self._lookback_minutes: int = lookback_minutes
+        self._lock: asyncio.Lock = asyncio.Lock()
         self._task: asyncio.Task[None] | None = None
-        self._running = False
-        self._seen_store = seen_store or GmailSeenStore(_DEFAULT_SEEN_PATH, DEFAULT_SEEN_LIMIT)
-        self._cleaner = EmailTextCleaner(max_url_length=60)
-        self._has_seeded_initial_snapshot = False
+        self._running: bool = False
+        self._seen_store: GmailSeenStore = seen_store or GmailSeenStore(
+            _DEFAULT_SEEN_PATH, DEFAULT_SEEN_LIMIT
+        )
+        self._cleaner: EmailTextCleaner = EmailTextCleaner(max_url_length=60)
+        self._has_seeded_initial_snapshot: bool = False
         self._last_poll_timestamp: datetime | None = None
 
     # Start the background email polling task
@@ -67,7 +68,10 @@ class ImportantEmailWatcher:
             self._task = loop.create_task(self._run(), name="important-email-watcher")
             logger.info(
                 "Important email watcher started",
-                extra={"interval_seconds": self._poll_interval, "lookback_minutes": self._lookback_minutes},
+                extra={
+                    "interval_seconds": self._poll_interval,
+                    "lookback_minutes": self._lookback_minutes,
+                },
             )
 
     # Stop the background email polling task gracefully
@@ -75,7 +79,7 @@ class ImportantEmailWatcher:
         async with self._lock:
             self._running = False
             if self._task:
-                self._task.cancel()
+                _ = self._task.cancel()
                 try:
                     await self._task
                 except asyncio.CancelledError:
@@ -90,7 +94,9 @@ class ImportantEmailWatcher:
                 try:
                     await self._poll_once()
                 except Exception as exc:  # pragma: no cover - defensive
-                    logger.exception("Important email watcher poll failed", extra={"error": str(exc)})
+                    logger.exception(
+                        "Important email watcher poll failed", extra={"error": str(exc)}
+                    )
                 await asyncio.sleep(self._poll_interval)
         except asyncio.CancelledError:
             raise
@@ -107,7 +113,10 @@ class ImportantEmailWatcher:
         previous_poll_timestamp = self._last_poll_timestamp
         interval_cutoff = user_now - timedelta(seconds=self._poll_interval)
         cutoff_time = interval_cutoff
-        if previous_poll_timestamp is not None and previous_poll_timestamp > interval_cutoff:
+        if (
+            previous_poll_timestamp is not None
+            and previous_poll_timestamp > interval_cutoff
+        ):
             cutoff_time = previous_poll_timestamp
 
         composio_user_id = get_active_gmail_user_id()
@@ -123,7 +132,9 @@ class ImportantEmailWatcher:
         }
 
         try:
-            raw_result = execute_gmail_tool("GMAIL_FETCH_EMAILS", composio_user_id, arguments=arguments)
+            raw_result = execute_gmail_tool(
+                "GMAIL_FETCH_EMAILS", composio_user_id, arguments=arguments
+            )
         except Exception as exc:
             logger.warning(
                 "Failed to fetch Gmail messages for watcher",
@@ -152,7 +163,9 @@ class ImportantEmailWatcher:
             return
 
         unseen_emails: list[ProcessedEmail] = [
-            email for email in processed_emails if not self._seen_store.is_seen(email.id)
+            email
+            for email in processed_emails
+            if not self._seen_store.is_seen(email.id)
         ]
 
         if not unseen_emails:
@@ -163,7 +176,9 @@ class ImportantEmailWatcher:
             self._complete_poll(user_now)
             return
 
-        unseen_emails.sort(key=lambda email: email.timestamp or datetime.now(timezone.utc))
+        unseen_emails.sort(
+            key=lambda email: email.timestamp or datetime.now(timezone.utc)
+        )
 
         eligible_emails: list[ProcessedEmail] = []
         aged_emails: list[ProcessedEmail] = []
@@ -223,7 +238,7 @@ class ImportantEmailWatcher:
         runtime = _resolve_interaction_runtime()
         try:
             contextualized = f"Important email watcher notification:\n{summary}"
-            await runtime.handle_agent_message(contextualized)
+            _ = await runtime.handle_agent_message(contextualized)
         except Exception as exc:  # pragma: no cover - defensive
             logger.error(
                 "Failed to dispatch important email summary",

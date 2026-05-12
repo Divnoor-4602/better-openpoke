@@ -202,7 +202,9 @@ def _fetch_profile_from_composio(user_id: object) -> JsonDict | None:
                 break
     elif result.get("successful") is True:
         profile = _as_dict(result.get("result"))
-    elif all(not isinstance(result.get(key), dict) for key in ("data", "profile", "result")):
+    elif all(
+        not isinstance(result.get(key), dict) for key in ("data", "profile", "result")
+    ):
         profile = result if result else None
 
     if profile is not None:
@@ -272,7 +274,8 @@ def fetch_status(payload: GmailStatusPayload) -> JSONResponse:
         if connection_request_id:
             try:
                 wait_for_connection = cast(
-                    Callable[..., object], _attr(connected_accounts, "wait_for_connection")
+                    Callable[..., object],
+                    _attr(connected_accounts, "wait_for_connection"),
                 )
                 account = wait_for_connection(connection_request_id, timeout=2.0)
             except Exception:
@@ -576,8 +579,7 @@ def _as_mapping(value: object) -> Mapping[str, object] | None:
     if not isinstance(value, Mapping):
         return None
     return {
-        str(key): item
-        for key, item in cast(Mapping[object, object], value).items()
+        str(key): item for key, item in cast(Mapping[object, object], value).items()
     }
 
 

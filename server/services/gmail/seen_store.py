@@ -7,6 +7,7 @@ import threading
 from collections import deque
 from collections.abc import Iterable
 from pathlib import Path
+from typing import cast
 
 from ...logging_config import logger
 
@@ -15,9 +16,9 @@ class GmailSeenStore:
     """Maintain a bounded set of Gmail message IDs backed by a JSON file."""
 
     def __init__(self, path: Path, max_entries: int = 300) -> None:
-        self._path = path
-        self._max_entries = max_entries
-        self._lock = threading.Lock()
+        self._path: Path = path
+        self._max_entries: int = max_entries
+        self._lock: threading.Lock = threading.Lock()
         self._entries: deque[str] = deque()
         self._index: set[str] = set()
         self._load()
@@ -37,7 +38,9 @@ class GmailSeenStore:
             return normalized in self._index
 
     def mark_seen(self, message_ids: Iterable[str]) -> None:
-        normalized_ids = [mid for mid in (self._normalize(mid) for mid in message_ids) if mid]
+        normalized_ids = [
+            mid for mid in (self._normalize(mid) for mid in message_ids) if mid
+        ]
         if not normalized_ids:
             return
 
@@ -76,7 +79,7 @@ class GmailSeenStore:
 
     def _load(self) -> None:
         try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
+            data = cast(object, json.loads(self._path.read_text(encoding="utf-8")))
         except FileNotFoundError:
             return
         except Exception as exc:  # pragma: no cover - defensive
@@ -93,7 +96,7 @@ class GmailSeenStore:
             )
             return
 
-        for raw_id in data[-self._max_entries :]:
+        for raw_id in cast(list[object], data[-self._max_entries :]):
             normalized = self._normalize(raw_id)
             if normalized and normalized not in self._index:
                 self._entries.append(normalized)
@@ -102,13 +105,13 @@ class GmailSeenStore:
     def _prune_locked(self) -> None:
         while len(self._entries) > self._max_entries:
             oldest = self._entries.popleft()
-            self._index.discard(oldest)
+            _ = self._index.discard(oldest)
 
     def _persist_locked(self) -> None:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             payload = list(self._entries)
-            self._path.write_text(json.dumps(payload), encoding="utf-8")
+            _ = self._path.write_text(json.dumps(payload), encoding="utf-8")
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning(
                 "Failed to persist Gmail seen-store",
