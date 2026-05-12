@@ -2,24 +2,28 @@
 
 from __future__ import annotations
 
+import base64
 import html
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import TypeAlias, cast
 
 from bs4 import BeautifulSoup
 
 from ...logging_config import logger
 from ...utils.timezones import convert_to_user_timezone
 
+GmailPayload: TypeAlias = Mapping[str, object]
+
 
 class EmailTextCleaner:
     """Clean and extract readable text from Gmail API email responses."""
 
     def __init__(self, max_url_length: int = 60) -> None:
-        self.max_url_length = max_url_length
-        self.remove_elements = [
+        self.max_url_length: int = max_url_length
+        self.remove_elements: list[str] = [
             "style",
             "script",
             "meta",
@@ -32,24 +36,22 @@ class EmailTextCleaner:
             "object",
             "img",
         ]
-        self.noise_elements = [
+        self.noise_elements: list[str] = [
             "footer",
             "header",
             ".footer",
             ".header",
-            "[class*=\"footer\"]",
-            "[class*=\"header\"]",
-            "[class*=\"tracking\"]",
-            "[class*=\"pixel\"]",
-            "[style*=\"display:none\"]",
-            "[style*=\"display: none\"]",
+            '[class*="footer"]',
+            '[class*="header"]',
+            '[class*="tracking"]',
+            '[class*="pixel"]',
+            '[style*="display:none"]',
+            '[style*="display: none"]',
         ]
 
-    # ------------------------------------------------------------------
     # Public API
-    # ------------------------------------------------------------------
     # Extract and clean email content from Gmail API message payload
-    def clean_email_content(self, message: Dict[str, Any]) -> str:
+    def clean_email_content(self, message: GmailPayload) -> str:
         """Return cleaned plain-text representation of a Gmail message."""
 
         html_content = self._extract_html_body(message)
@@ -68,12 +70,12 @@ class EmailTextCleaner:
 
             for element_type in self.remove_elements:
                 for element in soup.find_all(element_type):
-                    element.decompose()
+                    _ = element.decompose()
 
             for selector in self.noise_elements:
                 try:
                     for element in soup.select(selector):
-                        element.decompose()
+                        _ = element.decompose()
                 except Exception as exc:  # pragma: no cover - defensive
                     logger.debug(
                         "Failed to remove element via selector",
@@ -89,11 +91,11 @@ class EmailTextCleaner:
                     display_url = self.truncate_url(href)
 
                     if text and text != href and not self.is_url_like(text):
-                        link.replace_with(f"{text} ({display_url})")
+                        _ = link.replace_with(f"{text} ({display_url})")
                     elif text and text != href:
-                        link.replace_with(f"[Link: {display_url}]")
+                        _ = link.replace_with(f"[Link: {display_url}]")
                     else:
-                        link.replace_with(f"[Link: {display_url}]")
+                        _ = link.replace_with(f"[Link: {display_url}]")
 
             text = soup.get_text(separator="\n", strip=True)
             return self.post_process_text(text)
@@ -189,46 +191,62 @@ class EmailTextCleaner:
         stripped = re.sub(r"\s+", " ", stripped)
         return self.post_process_text(stripped)
 
-    def _extract_html_body(self, message: Dict[str, Any]) -> Optional[str]:
-        payload = message.get("payload") or {}
-        if isinstance(payload, dict):
+    def _extract_html_body(self, message: GmailPayload) -> str | None:
+        payload = message.get("payload")
+        payload_map = _as_string_mapping(payload)
+        if payload_map is not None:
+            payload = payload_map
             parts = payload.get("parts")
             if isinstance(parts, list):
-                for part in parts:
-                    if not isinstance(part, dict):
+                for raw_part in cast(list[object], parts):
+                    part = _as_string_mapping(raw_part)
+                    if part is None:
                         continue
                     mime_type = part.get("mimeType") or ""
-                    if mime_type.lower() == "text/html":
-                        if body := part.get("body"):
-                            data = body.get("data")
+                    if isinstance(mime_type, str) and mime_type.lower() == "text/html":
+                        body = part.get("body")
+                        body_map = _as_string_mapping(body)
+                        if body_map is not None:
+                            data = body_map.get("data")
                             if isinstance(data, str):
                                 try:
-                                    import base64
-
-                                    return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+                                    return base64.urlsafe_b64decode(data).decode(
+                                        "utf-8", errors="replace"
+                                    )
                                 except Exception:
                                     continue
-        return message.get("htmlBody")
+        html_body = message.get("htmlBody")
+        return html_body if isinstance(html_body, str) else None
 
-    def _extract_plain_body(self, message: Dict[str, Any]) -> Optional[str]:
-        payload = message.get("payload") or {}
-        if isinstance(payload, dict):
-            if body := payload.get("body"):
+    def _extract_plain_body(self, message: GmailPayload) -> str | None:
+        payload = message.get("payload")
+        payload_map = _as_string_mapping(payload)
+        if payload_map is not None:
+            payload = payload_map
+            body = payload.get("body")
+            body_map = _as_string_mapping(body)
+            if body_map is not None:
+                body = body_map
                 data = body.get("data")
                 if isinstance(data, str):
                     try:
-                        import base64
-
-                        return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+                        return base64.urlsafe_b64decode(data).decode(
+                            "utf-8", errors="replace"
+                        )
                     except Exception:
                         pass
-        return message.get("textBody")
+        text_body = message.get("textBody")
+        return text_body if isinstance(text_body, str) else None
 
-    def extract_attachment_info(self, attachments: Iterable[Any]) -> Tuple[bool, int, List[str]]:
-        filenames: List[str] = []
+    def extract_attachment_info(
+        self, attachments: Iterable[object] | None
+    ) -> tuple[bool, int, list[str]]:
+        filenames: list[str] = []
         count = 0
         for item in attachments or []:
-            if isinstance(item, dict):
+            item_map = _as_string_mapping(item)
+            if item_map is not None:
+                item = item_map
                 filename = item.get("filename") or item.get("name")
                 if filename:
                     filenames.append(str(filename))
@@ -241,25 +259,26 @@ class ProcessedEmail:
     """Normalized Gmail message representation."""
 
     id: str
-    thread_id: Optional[str]
+    thread_id: str | None
     query: str
     subject: str
     sender: str
     recipient: str
     timestamp: datetime
-    label_ids: List[str]
+    label_ids: list[str]
     clean_text: str
     has_attachments: bool
     attachment_count: int
-    attachment_filenames: List[str]
+    attachment_filenames: list[str]
 
 
 # ----------------------------------------------------------------------
 # Helpers shared across modules
 # ----------------------------------------------------------------------
 
+
 # Parse Gmail timestamp string into timezone-aware datetime object
-def parse_gmail_timestamp(raw: Optional[str]) -> Optional[datetime]:
+def parse_gmail_timestamp(raw: str | None) -> datetime | None:
     if not raw:
         return None
 
@@ -273,21 +292,24 @@ def parse_gmail_timestamp(raw: Optional[str]) -> Optional[datetime]:
 
 # Convert raw Gmail API message into a clean ProcessedEmail object
 def build_processed_email(
-    message: Dict[str, Any],
+    message: GmailPayload,
     *,
     query: str,
-    cleaner: Optional[EmailTextCleaner] = None,
-) -> Optional[ProcessedEmail]:
-    message_id = (message.get("messageId") or message.get("id") or "").strip()
+    cleaner: EmailTextCleaner | None = None,
+) -> ProcessedEmail | None:
+    message_id = _string_value(message.get("messageId") or message.get("id"))
     if not message_id:
         logger.warning("Skipping email with missing message ID")
         return None
 
     cleaner = cleaner or EmailTextCleaner()
 
-    timestamp = parse_gmail_timestamp(message.get("messageTimestamp"))
+    timestamp = parse_gmail_timestamp(_optional_string(message.get("messageTimestamp")))
     if not timestamp:
-        logger.warning("Email missing timestamp; using current time", extra={"message_id": message_id})
+        logger.warning(
+            "Email missing timestamp; using current time",
+            extra={"message_id": message_id},
+        )
         timestamp = convert_to_user_timezone(datetime.now(timezone.utc))
 
     try:
@@ -299,14 +321,24 @@ def build_processed_email(
         )
         clean_text = "Error processing email content"
 
-    attachments = message.get("attachmentList", [])
-    has_attachments, attachment_count, attachment_filenames = cleaner.extract_attachment_info(attachments)
+    attachments = message.get("attachmentList")
+    has_attachments, attachment_count, attachment_filenames = (
+        cleaner.extract_attachment_info(
+            attachments if isinstance(attachments, Iterable) else None
+        )
+    )
 
-    thread_id = message.get("threadId") or message.get("thread_id")
-    subject = message.get("subject") or "No Subject"
-    sender = message.get("sender") or "Unknown Sender"
-    recipient = message.get("to") or "Unknown Recipient"
-    label_ids = list(message.get("labelIds") or [])
+    thread_id = _optional_string(message.get("threadId") or message.get("thread_id"))
+    subject = _string_value(message.get("subject"), default="No Subject")
+    sender = _string_value(message.get("sender"), default="Unknown Sender")
+    recipient = _string_value(message.get("to"), default="Unknown Recipient")
+    label_ids_value = message.get("labelIds")
+    label_ids = (
+        [str(label_id) for label_id in label_ids_value if label_id is not None]
+        if isinstance(label_ids_value, Iterable)
+        and not isinstance(label_ids_value, str)
+        else []
+    )
 
     return ProcessedEmail(
         id=message_id,
@@ -326,15 +358,13 @@ def build_processed_email(
 
 # Convert multiple raw Gmail messages into ProcessedEmail objects
 def build_processed_emails(
-    messages: Sequence[Dict[str, Any]],
+    messages: Sequence[GmailPayload],
     *,
     query: str,
-    cleaner: Optional[EmailTextCleaner] = None,
-) -> List[ProcessedEmail]:
-    processed: List[ProcessedEmail] = []
+    cleaner: EmailTextCleaner | None = None,
+) -> list[ProcessedEmail]:
+    processed: list[ProcessedEmail] = []
     for message in messages:
-        if not isinstance(message, dict):
-            continue
         email = build_processed_email(message, query=query, cleaner=cleaner)
         if email is not None:
             processed.append(email)
@@ -343,51 +373,80 @@ def build_processed_emails(
 
 # Parse Composio Gmail API response and extract clean email data with pagination
 def parse_gmail_fetch_response(
-    raw_result: Any,
+    raw_result: object,
     *,
     query: str,
-    cleaner: Optional[EmailTextCleaner] = None,
-) -> Tuple[List[ProcessedEmail], Optional[str]]:
+    cleaner: EmailTextCleaner | None = None,
+) -> tuple[list[ProcessedEmail], str | None]:
     """Convert Composio Gmail fetch payload into processed email models."""
 
-    emails: List[ProcessedEmail] = []
-    next_page: Optional[str] = None
+    emails: list[ProcessedEmail] = []
+    next_page: str | None = None
 
-    containers = [raw_result] if isinstance(raw_result, dict) else (
-        raw_result if isinstance(raw_result, list) else []
-    )
+    containers: Sequence[object]
+    if isinstance(raw_result, Mapping):
+        containers = [_as_string_mapping(cast(object, raw_result)) or {}]
+    elif isinstance(raw_result, list):
+        containers = cast(list[object], raw_result)
+    else:
+        containers = []
 
-    for container in containers:
-        if not isinstance(container, dict):
+    for raw_container in containers:
+        container = _as_string_mapping(raw_container)
+        if container is None:
             continue
 
-        messages_block: Optional[Sequence[Any]] = None
+        messages_block: Sequence[object] | None = None
 
         data_section = container.get("data")
-        if isinstance(data_section, dict):
+        data_section_map = _as_string_mapping(data_section)
+        if data_section_map is not None:
+            data_section = data_section_map
             token = data_section.get("nextPageToken")
             if isinstance(token, str) and not next_page:
                 next_page = token
             candidate = data_section.get("messages")
             if isinstance(candidate, list):
-                messages_block = candidate
+                messages_block = cast(list[object], candidate)
 
         if messages_block is None:
             candidate = container.get("messages")
             if isinstance(candidate, list):
-                messages_block = candidate
+                messages_block = cast(list[object], candidate)
 
         if not messages_block:
             continue
 
         for message in messages_block:
-            if not isinstance(message, dict):
+            message_map = _as_string_mapping(message)
+            if message_map is None:
                 continue
-            processed = build_processed_email(message, query=query, cleaner=cleaner)
+            processed = build_processed_email(message_map, query=query, cleaner=cleaner)
             if processed:
                 emails.append(processed)
 
     return emails, next_page
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _string_value(value: object, *, default: str = "") -> str:
+    if value is None:
+        return default
+    text = str(value).strip()
+    return text or default
+
+
+def _as_string_mapping(value: object) -> Mapping[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return {
+        str(key): item for key, item in cast(Mapping[object, object], value).items()
+    }
 
 
 __all__ = [

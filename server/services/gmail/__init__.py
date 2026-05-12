@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from .client import (
     disconnect_account,
     execute_gmail_tool,
@@ -16,7 +14,7 @@ from .processing import EmailTextCleaner, ProcessedEmail, parse_gmail_fetch_resp
 from .seen_store import GmailSeenStore
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> object:
     if name in {"ImportantEmailWatcher", "get_important_email_watcher"}:
         from .importance_watcher import ImportantEmailWatcher, get_important_email_watcher
 

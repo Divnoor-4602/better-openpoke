@@ -1,5 +1,5 @@
 import asyncio
-from typing import Optional, Union
+from typing import Final
 
 from fastapi import status
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -7,11 +7,13 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from ...agents.interaction_agent.runtime import InteractionAgentRuntime
 from ...logging_config import logger
 from ...models import ChatMessage, ChatRequest
-from ...utils import error_response
+from ...utils.responses import error_response
+
+_BACKGROUND_TASKS: Final[set[asyncio.Task[None]]] = set()
 
 
 # Extract the most recent user message from the chat request payload
-def _extract_latest_user_message(payload: ChatRequest) -> Optional[ChatMessage]:
+def _extract_latest_user_message(payload: ChatRequest) -> ChatMessage | None:
     for message in reversed(payload.messages):
         if message.role.lower().strip() == "user" and message.content.strip():
             return message
@@ -19,15 +21,21 @@ def _extract_latest_user_message(payload: ChatRequest) -> Optional[ChatMessage]:
 
 
 # Process incoming chat requests by routing them to the interaction agent runtime
-async def handle_chat_request(payload: ChatRequest) -> Union[PlainTextResponse, JSONResponse]:
+async def handle_chat_request(
+    payload: ChatRequest,
+) -> PlainTextResponse | JSONResponse:
     """Handle a chat request using the InteractionAgentRuntime."""
 
     # Extract user message
     user_message = _extract_latest_user_message(payload)
     if user_message is None:
-        return error_response("Missing user message", status_code=status.HTTP_400_BAD_REQUEST)
+        return error_response(
+            "Missing user message", status_code=status.HTTP_400_BAD_REQUEST
+        )
 
-    user_content = user_message.content.strip()  # Already checked in _extract_latest_user_message
+    user_content = (
+        user_message.content.strip()
+    )  # Already checked in _extract_latest_user_message
 
     logger.info("chat request", extra={"message_length": len(user_content)})
 
@@ -40,10 +48,12 @@ async def handle_chat_request(payload: ChatRequest) -> Union[PlainTextResponse, 
 
     async def _run_interaction() -> None:
         try:
-            await runtime.execute(user_message=user_content)
+            _ = await runtime.execute(user_message=user_content)
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception(f"chat task failed: {exc}")
 
-    asyncio.create_task(_run_interaction())
+    task = asyncio.create_task(_run_interaction())
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
 
     return PlainTextResponse("", status_code=status.HTTP_202_ACCEPTED)

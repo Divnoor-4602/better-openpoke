@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import re
 import threading
+from collections.abc import Iterator
 from html import escape, unescape
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Protocol, TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Protocol
 
 from ...config import get_settings
 from ...logging_config import logger
@@ -52,11 +53,11 @@ class ConversationLog:
     """Append-only conversation log persisted to disk for the interaction agent."""
 
     def __init__(self, path: Path, formatter: TranscriptFormatter = _default_formatter):
-        self._path = path
-        self._formatter = formatter
-        self._lock = threading.Lock()
+        self._path: Path = path
+        self._formatter: TranscriptFormatter = formatter
+        self._lock: threading.Lock = threading.Lock()
         self._ensure_directory()
-        self._working_memory_log = _resolve_working_memory_log()
+        self._working_memory_log: WorkingMemoryLog = _resolve_working_memory_log()
 
     def _ensure_directory(self) -> None:
         try:
@@ -70,7 +71,7 @@ class ConversationLog:
         with self._lock:
             try:
                 with self._path.open("a", encoding="utf-8") as handle:
-                    handle.write(entry)
+                    _ = handle.write(entry)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.error(
                     "conversation log append failed",
@@ -80,7 +81,7 @@ class ConversationLog:
         self._notify_summarization()
         return timestamp
 
-    def _parse_line(self, line: str) -> Optional[Tuple[str, str, str]]:
+    def _parse_line(self, line: str) -> tuple[str, str, str] | None:
         stripped = line.strip()
         if not stripped.startswith("<") or "</" not in stripped:
             return None
@@ -100,13 +101,13 @@ class ConversationLog:
         if closing_tag != tag:
             return None
         payload = stripped[open_end + 1 : close_start]
-        attributes: Dict[str, str] = {
+        attributes: dict[str, str] = {
             match.group(1): match.group(2) for match in _ATTR_PATTERN.finditer(attr_string)
         }
         timestamp = attributes.get("timestamp", "")
         return tag, timestamp, _decode_payload(payload)
 
-    def iter_entries(self) -> Iterator[Tuple[str, str, str]]:
+    def iter_entries(self) -> Iterator[tuple[str, str, str]]:
         with self._lock:
             try:
                 lines = self._path.read_text(encoding="utf-8").splitlines()
@@ -123,8 +124,22 @@ class ConversationLog:
                 yield item
 
     def load_transcript(self) -> str:
-        parts: List[str] = []
+        parts: list[str] = []
         for tag, timestamp, payload in self.iter_entries():
+            safe_payload = escape(payload, quote=False)
+            if timestamp:
+                parts.append(f"<{tag} timestamp=\"{timestamp}\">{safe_payload}</{tag}>")
+            else:
+                parts.append(f"<{tag}>{safe_payload}</{tag}>")
+        return "\n".join(parts)
+
+    def load_recent_transcript(self, limit: int) -> str:
+        if limit <= 0:
+            return ""
+
+        entries = list(self.iter_entries())[-limit:]
+        parts: list[str] = []
+        for tag, timestamp, payload in entries:
             safe_payload = escape(payload, quote=False)
             if timestamp:
                 parts.append(f"<{tag} timestamp=\"{timestamp}\">{safe_payload}</{tag}>")
@@ -171,8 +186,8 @@ class ConversationLog:
                 extra={"error": str(exc)},
             )
 
-    def to_chat_messages(self) -> List[ChatMessage]:
-        messages: List[ChatMessage] = []
+    def to_chat_messages(self) -> list[ChatMessage]:
+        messages: list[ChatMessage] = []
         for tag, timestamp, payload in self.iter_entries():
             normalized_timestamp = timestamp or None
             if tag == "user_message":

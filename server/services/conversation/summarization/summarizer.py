@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 from importlib import import_module
-from typing import List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 
 from ....config import get_settings
 from ....logging_config import logger
@@ -15,19 +16,25 @@ if TYPE_CHECKING:  # pragma: no cover - type checking only
     from ..log import ConversationLog
 
 
+class _ConversationLogReader(Protocol):
+    def iter_entries(self) -> Iterator[tuple[str, str, str]]:
+        ...
+
+
 def _resolve_conversation_log() -> "ConversationLog":
     module = import_module("server.services.conversation.log")
-    return module.get_conversation_log()
+    get_log = cast("Callable[[], ConversationLog]", getattr(module, "get_conversation_log"))
+    return get_log()
 
 
-def _collect_entries(log) -> List[LogEntry]:
-    entries: List[LogEntry] = []
+def _collect_entries(log: _ConversationLogReader) -> list[LogEntry]:
+    entries: list[LogEntry] = []
     for index, (tag, timestamp, payload) in enumerate(log.iter_entries()):
         entries.append(LogEntry(tag=tag, payload=payload, index=index, timestamp=timestamp or None))
     return entries
 
 
-async def _call_openrouter(prompt: SummaryPrompt, model: str, api_key: Optional[str]) -> str:
+async def _call_openrouter(prompt: SummaryPrompt, model: str, api_key: str | None) -> str:
     last_error: Exception | None = None
     for attempt in range(2):
         try:

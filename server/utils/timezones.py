@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional
 
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -41,7 +40,7 @@ def resolve_user_timezone(default: str = "UTC") -> ZoneInfo:
     return ZoneInfo(default)
 
 
-def now_in_user_timezone(fmt: Optional[str] = None, *, default: str = "UTC") -> datetime | str:
+def now_in_user_timezone(fmt: str | None = None, *, default: str = "UTC") -> datetime | str:
     """Return the current time in the user's timezone.
 
     When *fmt* is provided, the result is formatted using ``datetime.strftime``;

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,7 +11,7 @@ TASK_TOOL_NAME = "task_email_search"
 SEARCH_TOOL_NAME = "gmail_fetch_emails"
 COMPLETE_TOOL_NAME = "return_search_results"
 
-_SCHEMAS: List[Dict[str, Any]] = [
+_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -40,7 +40,7 @@ class GmailSearchEmail(BaseModel):
 
     # Core identifiers
     id: str  # message_id from Gmail API
-    thread_id: Optional[str] = None
+    thread_id: str | None = None
     query: str  # The search query that found this email
     
     # Email metadata
@@ -48,7 +48,7 @@ class GmailSearchEmail(BaseModel):
     sender: str
     recipient: str  # to field
     timestamp: datetime
-    label_ids: List[str] = Field(default_factory=list)
+    label_ids: list[str] = Field(default_factory=list)
     
     # Clean content (primary field for LLM consumption)
     clean_text: str  # Processed, readable email content
@@ -56,18 +56,18 @@ class GmailSearchEmail(BaseModel):
     # Attachment information
     has_attachments: bool = False
     attachment_count: int = 0
-    attachment_filenames: List[str] = Field(default_factory=list)
+    attachment_filenames: list[str] = Field(default_factory=list)
 
 
 class EmailSearchToolResult(BaseModel):
     """Structured payload for each tool-call response."""
 
     status: Literal["success", "error"]
-    query: Optional[str] = None
-    result_count: Optional[int] = None
-    next_page_token: Optional[str] = None
-    messages: List[GmailSearchEmail] = Field(default_factory=list)
-    error: Optional[str] = None
+    query: str | None = None
+    result_count: int | None = None
+    next_page_token: str | None = None
+    messages: list[GmailSearchEmail] = Field(default_factory=list)
+    error: str | None = None
 
 
 class TaskEmailSearchPayload(BaseModel):
@@ -75,10 +75,10 @@ class TaskEmailSearchPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    emails: List[GmailSearchEmail]
+    emails: list[GmailSearchEmail]
 
 
-_COMPLETION_SCHEMAS: List[Dict[str, Any]] = [
+_COMPLETION_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -100,11 +100,11 @@ _COMPLETION_SCHEMAS: List[Dict[str, Any]] = [
     }
 ]
 
-def get_completion_schema() -> Dict[str, Any]:
+def get_completion_schema() -> dict[str, Any]:
     return _COMPLETION_SCHEMAS[0]
 
 
-def get_schemas() -> List[Dict[str, Any]]:
+def get_schemas() -> list[dict[str, Any]]:
     """Return the JSON schema for the email search task."""
 
     return _SCHEMAS

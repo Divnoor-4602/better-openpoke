@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Iterable, Mapping
+from time import perf_counter
+from typing import cast
 
 from ...config import get_settings
 from ...logging_config import logger
@@ -33,6 +35,7 @@ def rerank_candidates(
         from pinecone import Pinecone
 
         pc = Pinecone(api_key=get_settings().pinecone_api_key)
+        started = perf_counter()
         response = pc.inference.rerank(
             model=RERANK_MODEL,
             query=query,
@@ -40,6 +43,15 @@ def rerank_candidates(
             top_n=min(len(documents), max(limit * 3, limit)),
             return_documents=True,
             parameters={"truncate": "END"},
+        )
+        logger.info(
+            "Pinecone memory rerank completed",
+            extra={
+                "candidates": len(candidates),
+                "rerankable": len(rerankable),
+                "returned": min(len(documents), max(limit * 3, limit)),
+                "rerank_ms": round((perf_counter() - started) * 1000, 2),
+            },
         )
     except Exception as exc:  # pragma: no cover - external service failure
         logger.warning("Pinecone memory rerank failed", extra={"error": str(exc)})
@@ -52,7 +64,11 @@ def rerank_candidates(
         if index is None or index >= len(rerankable):
             continue
         candidate = rerankable[index]
-        candidate.score = max(candidate.score, float(_get(row, "score", 0.0) or 0.0) * 100.0)
+        score = _get(row, "score", 0.0) or 0.0
+        candidate.score = max(
+            candidate.score,
+            float(cast(float | int | str, score)) * 100.0,
+        )
         candidate.reason_parts.add("bge rerank")
         ranked.append(candidate)
         seen.add(candidate.dedupe_key)
@@ -82,22 +98,24 @@ def _fallback_text(candidate: SearchCandidate) -> str:
     )
 
 
-def _rerank_rows(response: Any) -> list[Any]:
-    if isinstance(response, dict):
-        return list(response.get("data") or [])
-    return list(getattr(response, "data", []) or [])
+def _rerank_rows(response: object) -> list[object]:
+    if isinstance(response, Mapping):
+        data = response.get("data") or []
+    else:
+        data = getattr(response, "data", []) or []
+    return list(cast(Iterable[object], data))
 
 
-def _row_index(row: Any) -> int | None:
+def _row_index(row: object) -> int | None:
     index = _get(row, "index")
     if index is not None:
-        return int(index)
+        return int(cast(str | int, index))
     document = _get(row, "document", {}) or {}
     doc_id = _get(document, "id")
-    return int(doc_id) if str(doc_id).isdigit() else None
+    return int(cast(str | int, doc_id)) if str(doc_id).isdigit() else None
 
 
-def _get(value: Any, key: str, default: Any = None) -> Any:
-    if isinstance(value, dict):
+def _get(value: object, key: str, default: object | None = None) -> object | None:
+    if isinstance(value, Mapping):
         return value.get(key, default)
     return getattr(value, key, default)

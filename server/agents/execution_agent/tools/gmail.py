@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from server.services.execution import get_execution_agent_logs
 from server.services.gmail.client import execute_gmail_tool, get_active_gmail_user_id
@@ -12,7 +13,7 @@ from server.services.memory import record_gmail_tool_result
 
 _GMAIL_AGENT_NAME = "gmail-execution-agent"
 
-_SCHEMAS: List[Dict[str, Any]] = [
+_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -317,9 +318,9 @@ _LOG_STORE = get_execution_agent_logs()
 
 
 # Return Gmail tool schemas
-def get_schemas() -> List[Dict[str, Any]]:
+def get_schemas() -> list[dict[str, Any]]:
     """Return Gmail tool schemas."""
-    
+
     return _SCHEMAS
 
 
@@ -327,9 +328,9 @@ def get_schemas() -> List[Dict[str, Any]]:
 def _execute(
     tool_name: str,
     composio_user_id: str,
-    arguments: Dict[str, Any],
-    memory_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    arguments: dict[str, Any],
+    memory_id: str | None = None,
+) -> dict[str, Any]:
     """Execute a Gmail tool and record the action for the execution agent journal."""
 
     payload = {k: v for k, v in arguments.items() if v is not None}
@@ -367,15 +368,15 @@ def gmail_create_draft(
     recipient_email: str,
     subject: str,
     body: str,
-    cc: Optional[List[str]] = None,
-    bcc: Optional[List[str]] = None,
-    extra_recipients: Optional[List[str]] = None,
-    is_html: Optional[bool] = None,
-    thread_id: Optional[str] = None,
-    attachment: Optional[Dict[str, Any]] = None,
-    memory_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    arguments: Dict[str, Any] = {
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+    extra_recipients: list[str] | None = None,
+    is_html: bool | None = None,
+    thread_id: str | None = None,
+    attachment: dict[str, Any] | None = None,
+    memory_id: str | None = None,
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
         "recipient_email": recipient_email,
         "subject": subject,
         "body": body,
@@ -395,9 +396,9 @@ def gmail_create_draft(
 # Send a previously created Gmail draft using Composio
 def gmail_execute_draft(
     draft_id: str,
-    memory_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    arguments = {"draft_id": draft_id}
+    memory_id: str | None = None,
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {"draft_id": draft_id}
     composio_user_id = get_active_gmail_user_id()
     if not composio_user_id:
         return {"error": "Gmail not connected. Please connect Gmail in settings first."}
@@ -408,10 +409,10 @@ def gmail_execute_draft(
 def gmail_forward_email(
     message_id: str,
     recipient_email: str,
-    additional_text: Optional[str] = None,
-    memory_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    arguments = {
+    additional_text: str | None = None,
+    memory_id: str | None = None,
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
         "message_id": message_id,
         "recipient_email": recipient_email,
         "additional_text": additional_text,
@@ -427,14 +428,14 @@ def gmail_reply_to_thread(
     thread_id: str,
     recipient_email: str,
     message_body: str,
-    cc: Optional[List[str]] = None,
-    bcc: Optional[List[str]] = None,
-    extra_recipients: Optional[List[str]] = None,
-    is_html: Optional[bool] = None,
-    attachment: Optional[Dict[str, Any]] = None,
-    memory_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    arguments = {
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+    extra_recipients: list[str] | None = None,
+    is_html: bool | None = None,
+    attachment: dict[str, Any] | None = None,
+    memory_id: str | None = None,
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
         "thread_id": thread_id,
         "recipient_email": recipient_email,
         "message_body": message_body,
@@ -453,9 +454,9 @@ def gmail_reply_to_thread(
 # Delete a specific Gmail draft using the Composio Gmail integration
 def gmail_delete_draft(
     draft_id: str,
-    memory_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    arguments = {"draft_id": draft_id}
+    memory_id: str | None = None,
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {"draft_id": draft_id}
     composio_user_id = get_active_gmail_user_id()
     if not composio_user_id:
         return {"error": "Gmail not connected. Please connect Gmail in settings first."}
@@ -463,13 +464,13 @@ def gmail_delete_draft(
 
 
 def gmail_get_contacts(
-    resource_name: Optional[str] = None,
-    person_fields: Optional[str] = None,
-    include_other_contacts: Optional[bool] = None,
-    page_token: Optional[str] = None,
-    memory_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    arguments = {
+    resource_name: str | None = None,
+    person_fields: str | None = None,
+    include_other_contacts: bool | None = None,
+    page_token: str | None = None,
+    memory_id: str | None = None,
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
         "resource_name": resource_name,
         "person_fields": person_fields,
         "include_other_contacts": include_other_contacts,
@@ -482,15 +483,15 @@ def gmail_get_contacts(
 
 
 def gmail_get_people(
-    resource_name: Optional[str] = None,
-    person_fields: Optional[str] = None,
-    page_size: Optional[int] = None,
-    page_token: Optional[str] = None,
-    sync_token: Optional[str] = None,
-    other_contacts: Optional[bool] = None,
-    memory_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    arguments = {
+    resource_name: str | None = None,
+    person_fields: str | None = None,
+    page_size: int | None = None,
+    page_token: str | None = None,
+    sync_token: str | None = None,
+    other_contacts: bool | None = None,
+    memory_id: str | None = None,
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
         "resource_name": resource_name,
         "person_fields": person_fields,
         "page_size": page_size,
@@ -505,12 +506,12 @@ def gmail_get_people(
 
 
 def gmail_list_drafts(
-    max_results: Optional[int] = None,
-    page_token: Optional[str] = None,
-    verbose: Optional[bool] = None,
-    memory_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    arguments = {
+    max_results: int | None = None,
+    page_token: str | None = None,
+    verbose: bool | None = None,
+    memory_id: str | None = None,
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
         "max_results": max_results,
         "page_token": page_token,
         "verbose": verbose,
@@ -523,13 +524,13 @@ def gmail_list_drafts(
 
 def gmail_search_people(
     query: str,
-    person_fields: Optional[str] = None,
-    page_size: Optional[int] = None,
-    other_contacts: Optional[bool] = None,
-    page_token: Optional[str] = None,
-    memory_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    arguments: Dict[str, Any] = {
+    person_fields: str | None = None,
+    page_size: int | None = None,
+    other_contacts: bool | None = None,
+    page_token: str | None = None,
+    memory_id: str | None = None,
+) -> dict[str, Any]:
+    arguments: dict[str, Any] = {
         "query": query,
         "person_fields": person_fields,
         "other_contacts": other_contacts,
@@ -545,9 +546,9 @@ def gmail_search_people(
 
 
 # Return Gmail tool callables
-def build_registry(agent_name: str) -> Dict[str, Callable[..., Any]]:
+def build_registry(agent_name: str) -> dict[str, Callable[..., object]]:
     """Return Gmail tool callables."""
-    
+
     return {
         "gmail_create_draft": partial(gmail_create_draft, memory_id=agent_name),
         "gmail_execute_draft": partial(gmail_execute_draft, memory_id=agent_name),

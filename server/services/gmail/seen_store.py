@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import threading
 from collections import deque
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Deque, Iterable, List, Optional, Set
 
 from ...logging_config import logger
 
@@ -18,8 +18,8 @@ class GmailSeenStore:
         self._path = path
         self._max_entries = max_entries
         self._lock = threading.Lock()
-        self._entries: Deque[str] = deque()
-        self._index: Set[str] = set()
+        self._entries: deque[str] = deque()
+        self._index: set[str] = set()
         self._load()
 
     # ------------------------------------------------------------------
@@ -56,7 +56,7 @@ class GmailSeenStore:
             self._prune_locked()
             self._persist_locked()
 
-    def snapshot(self) -> List[str]:
+    def snapshot(self) -> list[str]:
         with self._lock:
             return list(self._entries)
 
@@ -69,7 +69,7 @@ class GmailSeenStore:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _normalize(self, message_id: Optional[str]) -> str:
+    def _normalize(self, message_id: object) -> str:
         if not message_id:
             return ""
         return str(message_id).strip()

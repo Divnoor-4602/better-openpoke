@@ -9,7 +9,7 @@ export async function POST(req: Request) {
   const connectionRequestId = body?.connectionRequestId || '';
 
   const serverBase = process.env.PY_SERVER_URL || 'http://localhost:8001';
-  const url = `${serverBase.replace(/\/$/, '')}/api/v1/gmail/status`;
+  const url = `${serverBase.replace(/\/$/, '')}/api/gmail/status`;
   const payload: any = {};
   if (userId) payload.user_id = userId;
   if (connectionRequestId) payload.connection_request_id = connectionRequestId;

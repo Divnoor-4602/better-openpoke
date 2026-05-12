@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from .client import execute_gmail_tool, get_active_gmail_user_id
 from .processing import EmailTextCleaner, ProcessedEmail, parse_gmail_fetch_response
@@ -43,17 +43,17 @@ class ImportantEmailWatcher:
         poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
         lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
         *,
-        seen_store: Optional[GmailSeenStore] = None,
+        seen_store: GmailSeenStore | None = None,
     ) -> None:
         self._poll_interval = poll_interval_seconds
         self._lookback_minutes = lookback_minutes
         self._lock = asyncio.Lock()
-        self._task: Optional[asyncio.Task[None]] = None
+        self._task: asyncio.Task[None] | None = None
         self._running = False
         self._seen_store = seen_store or GmailSeenStore(_DEFAULT_SEEN_PATH, DEFAULT_SEEN_LIMIT)
         self._cleaner = EmailTextCleaner(max_url_length=60)
         self._has_seeded_initial_snapshot = False
-        self._last_poll_timestamp: Optional[datetime] = None
+        self._last_poll_timestamp: datetime | None = None
 
     # Start the background email polling task
     async def start(self) -> None:
@@ -151,7 +151,7 @@ class ImportantEmailWatcher:
             self._complete_poll(user_now)
             return
 
-        unseen_emails: List[ProcessedEmail] = [
+        unseen_emails: list[ProcessedEmail] = [
             email for email in processed_emails if not self._seen_store.is_seen(email.id)
         ]
 
@@ -165,8 +165,8 @@ class ImportantEmailWatcher:
 
         unseen_emails.sort(key=lambda email: email.timestamp or datetime.now(timezone.utc))
 
-        eligible_emails: List[ProcessedEmail] = []
-        aged_emails: List[ProcessedEmail] = []
+        eligible_emails: list[ProcessedEmail] = []
+        aged_emails: list[ProcessedEmail] = []
 
         for email in unseen_emails:
             email_timestamp = email.timestamp
@@ -195,7 +195,7 @@ class ImportantEmailWatcher:
             return
 
         summaries_sent = 0
-        processed_ids: List[str] = [email.id for email in aged_emails]
+        processed_ids: list[str] = [email.id for email in aged_emails]
 
         for email in eligible_emails:
             summary = await classify_email_importance(email)
@@ -231,7 +231,7 @@ class ImportantEmailWatcher:
             )
 
 
-_watcher_instance: Optional[ImportantEmailWatcher] = None
+_watcher_instance: ImportantEmailWatcher | None = None
 
 
 def get_important_email_watcher() -> ImportantEmailWatcher:

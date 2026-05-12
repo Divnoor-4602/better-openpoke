@@ -1,11 +1,22 @@
 """Execution agent support services."""
 
+from .event_store import (
+    ExecutionEvent,
+    ExecutionEventPayload,
+    ExecutionEventSubscription,
+    ExecutionEventStore,
+    ExecutionRun,
+    get_execution_event_store,
+)
 from .log_store import ExecutionAgentLogStore, get_execution_agent_logs
-from .roster import AgentRoster, get_agent_roster
 
 __all__ = [
+    "ExecutionEventStore",
+    "ExecutionEvent",
+    "ExecutionEventPayload",
+    "ExecutionEventSubscription",
+    "ExecutionRun",
     "ExecutionAgentLogStore",
+    "get_execution_event_store",
     "get_execution_agent_logs",
-    "AgentRoster",
-    "get_agent_roster",
 ]

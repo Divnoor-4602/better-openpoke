@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import cast
 
-from .processing import ProcessedEmail
 from ...config import get_settings
 from ...logging_config import logger
-from ...openrouter_client import OpenRouterError, request_chat_completion
-
+from ...openrouter_client import OpenRouterError, OpenRouterTool, request_chat_completion
+from .processing import ProcessedEmail
 
 _TOOL_NAME = "mark_email_importance"
-_TOOL_SCHEMA: Dict[str, Any] = {
+_TOOL_SCHEMA: OpenRouterTool = {
     "type": "function",
     "function": {
         "name": _TOOL_NAME,
@@ -56,7 +55,9 @@ _SYSTEM_PROMPT = (
 
 
 def _format_email_payload(email: ProcessedEmail) -> str:
-    attachments = ", ".join(email.attachment_filenames) if email.attachment_filenames else "None"
+    attachments = (
+        ", ".join(email.attachment_filenames) if email.attachment_filenames else "None"
+    )
     labels = ", ".join(email.label_ids) if email.label_ids else "None"
     header_lines = [
         f"Sender: {email.sender}",
@@ -77,7 +78,7 @@ def _format_email_payload(email: ProcessedEmail) -> str:
     )
 
 
-async def classify_email_importance(email: ProcessedEmail) -> Optional[str]:
+async def classify_email_importance(email: ProcessedEmail) -> str | None:
     """Return summary text when email should be surfaced; otherwise None."""
 
     settings = get_settings()
@@ -152,16 +153,16 @@ async def classify_email_importance(email: ProcessedEmail) -> Optional[str]:
     return None
 
 
-def _coerce_arguments(raw: Any) -> Optional[Dict[str, Any]]:
+def _coerce_arguments(raw: object) -> dict[str, object] | None:
     if raw is None:
         return {}
     if isinstance(raw, dict):
-        return raw
+        return cast(dict[str, object], raw)
     if isinstance(raw, str):
         if not raw.strip():
             return {}
         try:
-            return json.loads(raw)
+            return cast(dict[str, object], json.loads(raw))
         except json.JSONDecodeError:
             return None
     return None

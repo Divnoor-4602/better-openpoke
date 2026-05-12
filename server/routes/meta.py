@@ -10,8 +10,11 @@ from ..models import (
     SetTimezoneResponse,
 )
 from ..services import get_timezone_store
+from ..services.memory.indexer import MemoryIndexer
+from ..services.memory.store import _MEMORY_DB_PATH
 
 router = APIRouter(tags=["meta"])
+
 
 @router.get("/health", response_model=HealthResponse)
 # Return service health status for monitoring and load balancers
@@ -26,7 +29,8 @@ def meta(request: Request, settings: Settings = Depends(get_settings)) -> RootRe
         {
             route.path
             for route in request.app.routes
-            if getattr(route, "include_in_schema", False) and route.path.startswith("/api/")
+            if getattr(route, "include_in_schema", False)
+            and route.path.startswith("/api/")
         }
     )
     return RootResponse(
@@ -52,3 +56,9 @@ def set_timezone(payload: SetTimezoneRequest) -> SetTimezoneResponse:
 def get_timezone() -> SetTimezoneResponse:
     store = get_timezone_store()
     return SetTimezoneResponse(timezone=store.get_timezone())
+
+
+@router.get("/meta/memory-index")
+def memory_index_status() -> dict[str, object]:
+    """Return concise memory indexing queue health."""
+    return MemoryIndexer(_MEMORY_DB_PATH).queue_stats()

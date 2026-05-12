@@ -1,11 +1,11 @@
 """Response utilities."""
 
-from typing import Optional
+from __future__ import annotations
 
 from fastapi.responses import JSONResponse
 
 
-def error_response(message: str, *, status_code: int, detail: Optional[str] = None) -> JSONResponse:
+def error_response(message: str, *, status_code: int, detail: str | None = None) -> JSONResponse:
     """Create a standardized error response."""
     payload = {"ok": False, "error": message}
     if detail:

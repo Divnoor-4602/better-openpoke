@@ -11,7 +11,7 @@ export async function POST(req: Request) {
   const connectionRequestId = body?.connectionRequestId || '';
 
   const serverBase = process.env.PY_SERVER_URL || 'http://localhost:8001';
-  const url = `${serverBase.replace(/\/$/, '')}/api/v1/gmail/disconnect`;
+  const url = `${serverBase.replace(/\/$/, '')}/api/gmail/disconnect`;
   const payload: any = {};
   if (userId) payload.user_id = userId;
   if (connectionId) payload.connection_id = connectionId;

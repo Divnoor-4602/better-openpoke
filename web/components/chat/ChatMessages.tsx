@@ -18,19 +18,31 @@ export function ChatMessages({ messages, isWaitingForResponse, scrollContainerRe
       {messages.map((message, index) => {
         const isUser = message.role === 'user';
         const isDraft = message.role === 'draft';
+        const hasText = message.text.trim().length > 0;
         const next = messages[index + 1];
         const tail = !next || next.role !== message.role;
 
         return (
           <div key={message.id} className={clsx('flex', isUser ? 'justify-end' : 'justify-start')}>
-            <div
-              className={clsx(
-                isUser ? 'bubble-out' : 'bubble-in',
-                tail ? (isUser ? 'bubble-tail-out' : 'bubble-tail-in') : '',
-                isDraft && 'whitespace-pre-wrap',
+            <div className={clsx('max-w-[82%]', isUser ? 'items-end' : 'items-start')}>
+              {hasText && (
+                <div
+                  className={clsx(
+                    isUser ? 'bubble-out' : 'bubble-in',
+                    tail ? (isUser ? 'bubble-tail-out' : 'bubble-tail-in') : '',
+                    isDraft && 'whitespace-pre-wrap',
+                  )}
+                >
+                  <span className={isDraft ? 'block whitespace-pre-wrap' : 'whitespace-pre-wrap'}>{message.text}</span>
+                </div>
               )}
-            >
-              <span className={isDraft ? 'block whitespace-pre-wrap' : 'whitespace-pre-wrap'}>{message.text}</span>
+              {!isUser && message.statusLines && message.statusLines.length > 0 && (
+                <div className={clsx('space-y-0.5 px-2 text-xs text-gray-500', hasText && 'mt-1')}>
+                  {message.statusLines.map(line => (
+                    <div key={line}>{line}</div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         );

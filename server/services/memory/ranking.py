@@ -2,16 +2,103 @@
 
 from __future__ import annotations
 
+import sqlite3
+from collections.abc import Iterable, Mapping, Sequence
 from importlib import import_module
-from typing import Any
+from typing import Protocol, cast
 
 from .hybrid_search import SearchCandidate
+
+
+class _MemoryEvent(Protocol):
+    @property
+    def event_id(self) -> str: ...
+
+
+class _MemoryRecord(Protocol):
+    @property
+    def memory_id(self) -> str: ...
+
+    @property
+    def kind(self) -> str: ...
+
+    @property
+    def title(self) -> str: ...
+
+    @property
+    def summary(self) -> str: ...
+
+    @property
+    def created_at(self) -> str: ...
+
+    @property
+    def updated_at(self) -> str: ...
+
+    @property
+    def metadata(self) -> Mapping[str, object]: ...
+
+    @property
+    def links(self) -> Sequence[object]: ...
+
+    @property
+    def recent_events(self) -> Sequence[_MemoryEvent]: ...
+
+
+class _MemorySearchResult(Protocol):
+    @property
+    def memory(self) -> _MemoryRecord: ...
+
+    @property
+    def score(self) -> float: ...
+
+    @property
+    def confidence(self) -> str: ...
+
+    @property
+    def reason(self) -> str: ...
+
+
+class _MemoryStore(Protocol):
+    def get_memories(self, memory_ids: Iterable[str]) -> Mapping[str, _MemoryRecord]: ...
+
+    def _connect(self) -> sqlite3.Connection: ...
+
+    def _event_from_row(
+        self, conn: sqlite3.Connection, row: sqlite3.Row
+    ) -> _MemoryEvent: ...
+
+
+class _MemorySearchResultFactory(Protocol):
+    def __call__(
+        self,
+        *,
+        memory: _MemoryRecord,
+        score: float,
+        confidence: str,
+        reason: str,
+    ) -> _MemorySearchResult: ...
+
+
+class _MemoryRecordFactory(Protocol):
+    def __call__(
+        self,
+        *,
+        memory_id: str,
+        kind: str,
+        title: str,
+        summary: str,
+        created_at: str,
+        updated_at: str,
+        metadata: Mapping[str, object],
+        links: Sequence[object],
+        recent_events: Sequence[_MemoryEvent],
+    ) -> _MemoryRecord: ...
 
 
 class PromptContextRanker:
     """Group event-level hits by memory for prompt context packing."""
 
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: _MemoryStore) -> None:
         self._store = store
 
     def rank(
@@ -19,7 +106,7 @@ class PromptContextRanker:
         candidates: list[SearchCandidate],
         *,
         limit: int,
-    ) -> list[Any]:
+    ) -> list[_MemorySearchResult]:
         grouped: dict[str, SearchCandidate] = {}
         for candidate in candidates:
             if not candidate.memory_id:
@@ -41,7 +128,7 @@ class PromptContextRanker:
 class SearchResultRanker:
     """Preserve event-level matches while returning memory-compatible results."""
 
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: _MemoryStore) -> None:
         self._store = store
 
     def rank(
@@ -49,25 +136,35 @@ class SearchResultRanker:
         candidates: list[SearchCandidate],
         *,
         limit: int,
-    ) -> list[Any]:
+    ) -> list[_MemorySearchResult]:
         return _results_from_candidates(self._store, candidates, limit=limit)
 
 
 def _results_from_candidates(
-    store: Any,
+    store: _MemoryStore,
     candidates: list[SearchCandidate],
     *,
     limit: int,
-) -> list[Any]:
-    MemorySearchResult = import_module("server.services.memory.store").MemorySearchResult
+) -> list[_MemorySearchResult]:
+    MemorySearchResult = cast(
+        _MemorySearchResultFactory,
+        import_module("server.services.memory.store").MemorySearchResult,
+    )
 
-    results: list[Any] = []
+    results: list[_MemorySearchResult] = []
     seen_memory_ids: set[str] = set()
+    candidate_memory_ids = []
+    for candidate in candidates:
+        if candidate.memory_id and candidate.memory_id not in candidate_memory_ids:
+            candidate_memory_ids.append(candidate.memory_id)
+        if len(candidate_memory_ids) >= max(limit * 3, limit):
+            break
+    memories = store.get_memories(candidate_memory_ids)
     for candidate in candidates:
         memory_id = candidate.memory_id
         if not memory_id or memory_id in seen_memory_ids:
             continue
-        memory = store.get_memory(memory_id)
+        memory = memories.get(memory_id)
         if memory is None:
             continue
         if candidate.event_id:
@@ -87,11 +184,14 @@ def _results_from_candidates(
 
 
 def _memory_with_matched_event_first(
-    store: Any,
-    memory: Any,
+    store: _MemoryStore,
+    memory: _MemoryRecord,
     event_id: str,
-) -> Any:
-    MemoryRecord = import_module("server.services.memory.store").MemoryRecord
+) -> _MemoryRecord:
+    MemoryRecord = cast(
+        _MemoryRecordFactory,
+        import_module("server.services.memory.store").MemoryRecord,
+    )
 
     with store._connect() as conn:
         row = conn.execute(
@@ -101,7 +201,14 @@ def _memory_with_matched_event_first(
         if row is None:
             return memory
         event = store._event_from_row(conn, row)
-    events = [event] + [existing for existing in memory.recent_events if existing.event_id != event_id]
+    events = [
+        event,
+        *[
+            existing
+            for existing in memory.recent_events
+            if existing.event_id != event_id
+        ],
+    ]
     return MemoryRecord(
         memory_id=memory.memory_id,
         kind=memory.kind,

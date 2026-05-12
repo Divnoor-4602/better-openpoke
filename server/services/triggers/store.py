@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 from ...logging_config import logger
 from .models import TriggerRecord
 from .utils import to_storage_timestamp, utc_now
+
+_TriggerFieldValue = str | None
 
 
 class TriggerStore:
@@ -58,7 +60,7 @@ class TriggerStore:
             conn.execute(schema_sql)
             conn.execute(index_sql)
 
-    def insert(self, payload: Dict[str, Any]) -> int:
+    def insert(self, payload: Mapping[str, _TriggerFieldValue]) -> int:
         with self._lock, self._connect() as conn:
             columns = ", ".join(payload.keys())
             placeholders = ", ".join([":" + key for key in payload.keys()])
@@ -67,7 +69,7 @@ class TriggerStore:
             trigger_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             return int(trigger_id)
 
-    def fetch_one(self, trigger_id: int, agent_name: str) -> Optional[TriggerRecord]:
+    def fetch_one(self, trigger_id: int, agent_name: str) -> TriggerRecord | None:
         with self._lock, self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM triggers WHERE id = ? AND agent_name = ?",
@@ -75,7 +77,12 @@ class TriggerStore:
             ).fetchone()
         return self._row_to_record(row) if row else None
 
-    def update(self, trigger_id: int, agent_name: str, fields: Dict[str, Any]) -> bool:
+    def update(
+        self,
+        trigger_id: int,
+        agent_name: str,
+        fields: Mapping[str, _TriggerFieldValue],
+    ) -> bool:
         if not fields:
             return False
         assignments = ", ".join(f"{key} = :{key}" for key in fields.keys())
@@ -83,7 +90,7 @@ class TriggerStore:
             f"UPDATE triggers SET {assignments}, updated_at = :updated_at"
             " WHERE id = :trigger_id AND agent_name = :agent_name"
         )
-        payload = {
+        payload: dict[str, object] = {
             **fields,
             "updated_at": to_storage_timestamp(utc_now()),
             "trigger_id": trigger_id,
@@ -93,7 +100,7 @@ class TriggerStore:
             cursor = conn.execute(sql, payload)
             return cursor.rowcount > 0
 
-    def list_for_agent(self, agent_name: str) -> List[TriggerRecord]:
+    def list_for_agent(self, agent_name: str) -> list[TriggerRecord]:
         with self._lock, self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM triggers WHERE agent_name = ? ORDER BY next_trigger IS NULL, next_trigger",
@@ -102,13 +109,13 @@ class TriggerStore:
         return [self._row_to_record(row) for row in rows]
 
     def fetch_due(
-        self, agent_name: Optional[str], before_iso: str
-    ) -> List[TriggerRecord]:
+        self, agent_name: str | None, before_iso: str
+    ) -> list[TriggerRecord]:
         sql = (
             "SELECT * FROM triggers WHERE status = 'active' AND next_trigger IS NOT NULL"
             " AND next_trigger <= ?"
         )
-        params: List[Any] = [before_iso]
+        params: list[str] = [before_iso]
         if agent_name:
             sql += " AND agent_name = ?"
             params.append(agent_name)
@@ -122,7 +129,7 @@ class TriggerStore:
             conn.execute("DELETE FROM triggers")
 
     def _row_to_record(self, row: sqlite3.Row) -> TriggerRecord:
-        data = dict(row)
+        data: dict[str, object] = dict(row)
         return TriggerRecord.model_validate(data)
 
 

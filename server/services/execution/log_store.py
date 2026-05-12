@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import re
 import threading
+from collections.abc import Iterator
 from html import escape, unescape
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple
 
 from ...logging_config import logger
 from ...utils.timezones import now_in_user_timezone
-
 
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 _EXECUTION_LOG_DIR = _DATA_DIR / "execution_agents"
@@ -18,7 +17,9 @@ _EXECUTION_LOG_DIR = _DATA_DIR / "execution_agents"
 
 def _slugify(name: str) -> str:
     """Convert agent name to filesystem-safe slug."""
-    slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in name.strip()).strip("-")
+    slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in name.strip()).strip(
+        "-"
+    )
     while "--" in slug:
         slug = slug.replace("--", "-")
     return slug or "agent"
@@ -70,7 +71,7 @@ class ExecutionAgentLogStore:
         """Append an entry with the given tag."""
         encoded = _encode_payload(str(payload))
         timestamp = now_in_user_timezone("%Y-%m-%d %H:%M:%S")
-        entry = f"<{tag} timestamp=\"{timestamp}\">{encoded}</{tag}>\n"
+        entry = f'<{tag} timestamp="{timestamp}">{encoded}</{tag}>\n'
 
         with self._lock_for(agent_name):
             try:
@@ -79,7 +80,7 @@ class ExecutionAgentLogStore:
             except Exception as exc:
                 logger.error(f"Failed to append to log: {exc}")
 
-    def _parse_line(self, line: str) -> Optional[Tuple[str, str, str]]:
+    def _parse_line(self, line: str) -> tuple[str, str, str] | None:
         """Parse a single log line."""
         stripped = line.strip()
         if not (stripped.startswith("<") and "</" in stripped):
@@ -102,8 +103,9 @@ class ExecutionAgentLogStore:
         if closing_tag != tag:
             return None
 
-        attributes: Dict[str, str] = {
-            match.group(1): match.group(2) for match in _ATTR_PATTERN.finditer(attr_string)
+        attributes: dict[str, str] = {
+            match.group(1): match.group(2)
+            for match in _ATTR_PATTERN.finditer(attr_string)
         }
         timestamp = attributes.get("timestamp", "")
         payload = _decode_payload(stripped[open_end + 1 : close_start])
@@ -117,7 +119,9 @@ class ExecutionAgentLogStore:
         """Record an agent action (tool call)."""
         self._append(agent_name, "agent_action", description)
 
-    def record_tool_response(self, agent_name: str, tool_name: str, response: str) -> None:
+    def record_tool_response(
+        self, agent_name: str, tool_name: str, response: str
+    ) -> None:
         """Record the response from a tool."""
         self._append(agent_name, "tool_response", f"{tool_name}: {response}")
 
@@ -125,7 +129,7 @@ class ExecutionAgentLogStore:
         """Record the agent's final response."""
         self._append(agent_name, "agent_response", response)
 
-    def iter_entries(self, agent_name: str) -> Iterator[Tuple[str, str, str]]:
+    def iter_entries(self, agent_name: str) -> Iterator[tuple[str, str, str]]:
         """Iterate over all log entries for an agent."""
         path = self._log_path(agent_name)
         with self._lock_for(agent_name):
@@ -144,16 +148,18 @@ class ExecutionAgentLogStore:
 
     def load_transcript(self, agent_name: str) -> str:
         """Load the full transcript for inclusion in system prompt."""
-        parts: List[str] = []
+        parts: list[str] = []
         for tag, timestamp, payload in self.iter_entries(agent_name):
             escaped = escape(payload, quote=False)
             if timestamp:
-                parts.append(f"<{tag} timestamp=\"{timestamp}\">{escaped}</{tag}>")
+                parts.append(f'<{tag} timestamp="{timestamp}">{escaped}</{tag}>')
             else:
                 parts.append(f"<{tag}>{escaped}</{tag}>")
         return "\n".join(parts)
 
-    def load_recent(self, agent_name: str, limit: int = 10) -> list[tuple[str, str, str]]:
+    def load_recent(
+        self, agent_name: str, limit: int = 10
+    ) -> list[tuple[str, str, str]]:
         """Load recent log entries."""
         entries = list(self.iter_entries(agent_name))
         return entries[-limit:] if entries else []

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import List
-
 from pydantic import BaseModel
 
 
@@ -15,7 +13,7 @@ class RootResponse(BaseModel):
     status: str
     service: str
     version: str
-    endpoints: List[str]
+    endpoints: list[str]
 
 
 class SetTimezoneRequest(BaseModel):

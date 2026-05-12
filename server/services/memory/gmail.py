@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
 from .store import MemoryLink, MemoryRecord, MemoryStore, get_memory_store
 
@@ -15,9 +16,9 @@ def record_gmail_tool_result(
     *,
     tool_name: str,
     result: dict[str, Any],
-    arguments: Optional[dict[str, Any]] = None,
-    memory_id: Optional[str] = None,
-    store: Optional[MemoryStore] = None,
+    arguments: dict[str, Any] | None = None,
+    memory_id: str | None = None,
+    store: MemoryStore | None = None,
 ) -> list[str]:
     """Record memory events from normalized Composio Gmail tool results."""
     memory_store = store or get_memory_store()
@@ -77,8 +78,8 @@ def record_gmail_tool_result(
 def record_gmail_message(
     message: dict[str, Any],
     *,
-    memory_id: Optional[str] = None,
-    store: Optional[MemoryStore] = None,
+    memory_id: str | None = None,
+    store: MemoryStore | None = None,
 ) -> MemoryRecord:
     """Record one compact Gmail message event and its thread/message links."""
     memory_store = store or get_memory_store()
@@ -164,10 +165,10 @@ def _record_gmail_action(
     type: str,
     tool_name: str,
     result: dict[str, Any],
-    arguments: Optional[dict[str, Any]],
-    memory_id: Optional[str],
+    arguments: dict[str, Any] | None,
+    memory_id: str | None,
     store: MemoryStore,
-) -> Optional[MemoryRecord]:
+) -> MemoryRecord | None:
     payload = _dict_value(result.get("data")) or result
     args = arguments or {}
     thread_id = _find_key(payload, "threadId", "thread_id", "thread_id")
@@ -220,20 +221,20 @@ def _record_gmail_action(
         draft_id=draft_id,
         timestamp=store._now(),
     )
-    memory = (
-        store.get_memory(memory_id)
-        if memory_id
-        else store.ensure_memory_for_links(
-            kind="gmail_thread" if thread_id else "gmail_action",
-            title=title,
-            summary=summary,
-            metadata={"source": "gmail"},
-            links=links,
-        )
+    memory = _resolve_gmail_action_memory(
+        store=store,
+        inherited_memory_id=memory_id,
+        title=title,
+        summary=summary,
+        links=links,
+        thread_id=thread_id,
+        recipient=recipient,
+        subject=subject,
     )
     if memory is None:
         return None
 
+    title = _best_gmail_action_title(memory, title, recipient, subject)
     store.update_memory(
         memory.memory_id,
         title=title,
@@ -264,10 +265,106 @@ def _record_gmail_action(
         },
         links=links,
     )
+    _record_parent_child_memory_link(
+        store=store,
+        parent_memory_id=memory_id,
+        child_memory=memory,
+        action_type=type,
+        recipient=recipient,
+        subject=subject,
+        thread_id=thread_id,
+        message_id=message_id,
+        draft_id=draft_id,
+    )
     return store.get_memory(memory.memory_id) or memory
 
 
-def _find_draft_context(store: MemoryStore, draft_id: str) -> dict[str, Any]:
+def _resolve_gmail_action_memory(
+    *,
+    store: MemoryStore,
+    inherited_memory_id: str | None,
+    title: str,
+    summary: str,
+    links: list[MemoryLink],
+    thread_id: str,
+    recipient: str,
+    subject: str,
+) -> MemoryRecord | None:
+    """Classify Gmail actions into Gmail-specific memories, not broad task memories."""
+    if links:
+        return store.ensure_memory_for_links(
+            kind="gmail_thread" if thread_id else "gmail_action",
+            title=title,
+            summary=summary,
+            metadata={
+                "source": "gmail",
+                "recipient": recipient,
+                "subject": subject,
+                "parent_memory_id": inherited_memory_id,
+            },
+            links=links,
+        )
+    if inherited_memory_id:
+        return store.get_memory(inherited_memory_id)
+    return None
+
+
+def _best_gmail_action_title(
+    memory: MemoryRecord,
+    candidate_title: str,
+    recipient: str,
+    subject: str,
+) -> str:
+    if recipient or subject:
+        return candidate_title
+    existing_title = memory.title or ""
+    if " to " in existing_title or ": " in existing_title:
+        return existing_title
+    return candidate_title
+
+
+def _record_parent_child_memory_link(
+    *,
+    store: MemoryStore,
+    parent_memory_id: str | None,
+    child_memory: MemoryRecord,
+    action_type: str,
+    recipient: str,
+    subject: str,
+    thread_id: str,
+    message_id: str,
+    draft_id: str,
+) -> None:
+    if not parent_memory_id or parent_memory_id == child_memory.memory_id:
+        return
+
+    child_link = MemoryLink("child_memory", child_memory.memory_id)
+    store.add_links(parent_memory_id, [child_link])
+
+    label = _gmail_action_title("Gmail child memory", recipient, subject, child_memory.memory_id)
+    store.record_event(
+        type="gmail_child_memory_linked",
+        text=f"{label} -> {child_memory.memory_id}",
+        memory_id=parent_memory_id,
+        idempotency_key=(
+            f"gmail_child_memory_linked:{parent_memory_id}:"
+            f"{child_memory.memory_id}:{action_type}:{draft_id or message_id or thread_id}"
+        ),
+        source="gmail",
+        metadata={
+            "child_memory_id": child_memory.memory_id,
+            "action_type": action_type,
+            "recipient": recipient,
+            "subject": subject,
+            "thread_id": thread_id,
+            "message_id": message_id,
+            "draft_id": draft_id,
+        },
+        links=[child_link],
+    )
+
+
+def _find_draft_context(store: MemoryStore, draft_id: str) -> dict[str, str]:
     draft_event = store.find_event_by_link(
         kind="gmail_draft",
         value=draft_id,
@@ -276,15 +373,17 @@ def _find_draft_context(store: MemoryStore, draft_id: str) -> dict[str, Any]:
     if draft_event is None:
         return {}
 
+    linked_thread_id = _link_value(draft_event.links, "gmail_thread")
+    linked_recipient = _link_value(draft_event.links, "email_address")
     arguments = draft_event.metadata.get("arguments")
     if isinstance(arguments, dict):
         return {
             "recipient_email": _first_str(
-                arguments.get("recipient_email"), arguments.get("to")
+                arguments.get("recipient_email"), arguments.get("to"), linked_recipient
             ),
             "subject": _first_str(arguments.get("subject")),
             "thread_id": _first_str(
-                arguments.get("thread_id"), arguments.get("threadId")
+                arguments.get("thread_id"), arguments.get("threadId"), linked_thread_id
             ),
         }
 
@@ -292,12 +391,21 @@ def _find_draft_context(store: MemoryStore, draft_id: str) -> dict[str, Any]:
     if isinstance(result, dict):
         return {
             "recipient_email": _first_str(
-                result.get("recipient_email"), result.get("to")
+                result.get("recipient_email"), result.get("to"), linked_recipient
             ),
             "subject": _first_str(result.get("subject")),
-            "thread_id": _first_str(result.get("thread_id"), result.get("threadId")),
+            "thread_id": _first_str(
+                result.get("thread_id"), result.get("threadId"), linked_thread_id
+            ),
         }
-    return {}
+    return {"recipient_email": linked_recipient, "thread_id": linked_thread_id}
+
+
+def _link_value(links: Iterable[MemoryLink], kind: str) -> str:
+    for link in links:
+        if link.kind == kind and link.value:
+            return link.value
+    return ""
 
 
 def _gmail_action_title(
@@ -347,10 +455,10 @@ def _extract_messages(result: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
-def _attachment_filenames(payload: Any) -> list[str]:
+def _attachment_filenames(payload: object) -> list[str]:
     filenames: list[str] = []
 
-    def walk(part: Any) -> None:
+    def walk(part: object) -> None:
         if not isinstance(part, dict):
             return
         filename = _first_str(part.get("filename"))
@@ -378,18 +486,18 @@ def _numbers(value: str) -> list[str]:
     return list(dict.fromkeys(_NUMBER_PATTERN.findall(value or "")))
 
 
-def _first_str(*values: Any) -> str:
+def _first_str(*values: object) -> str:
     for value in values:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
 
 
-def _dict_value(value: Any) -> dict[str, Any]:
+def _dict_value(value: object) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _find_key(payload: Any, *keys: str) -> str:
+def _find_key(payload: object, *keys: str) -> str:
     if isinstance(payload, dict):
         for key in keys:
             value = payload.get(key)
@@ -407,7 +515,7 @@ def _find_key(payload: Any, *keys: str) -> str:
     return ""
 
 
-def _compact_links(values: Iterable[Optional[MemoryLink]]) -> list[MemoryLink]:
+def _compact_links(values: Iterable[MemoryLink | None]) -> list[MemoryLink]:
     links: list[MemoryLink] = []
     seen: set[tuple[str, str]] = set()
     for link in values:

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Sequence
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, cast
 
 from server.config import get_settings
 from server.logging_config import logger
-from server.openrouter_client import request_chat_completion
+from server.openrouter_client import OpenRouterChatCompletion, request_chat_completion
 from server.services.execution import get_execution_agent_logs
 from server.services.gmail.client import execute_gmail_tool, get_active_gmail_user_id
 from server.services.gmail.processing import (
@@ -52,32 +53,32 @@ _EMAIL_CLEANER = EmailTextCleaner(max_url_length=40)
 
 # Create standardized error response for tool calls
 def _create_error_response(
-    call_id: str, query: Optional[str], error: str
-) -> Tuple[str, str]:
+    call_id: str, query: str | None, error: str
+) -> tuple[str, str]:
     """Create standardized error response for tool calls."""
     result = EmailSearchToolResult(status="error", query=query, error=error)
     return (call_id, _safe_json_dumps(result.model_dump(exclude_none=True)))
 
 
 # Create standardized success response for tool calls
-def _create_success_response(call_id: str, data: Dict[str, Any]) -> Tuple[str, str]:
+def _create_success_response(call_id: str, data: dict[str, Any]) -> tuple[str, str]:
     """Create standardized success response for tool calls."""
     return (call_id, _safe_json_dumps(data))
 
 
-def _validate_search_query(search_query: str) -> Optional[str]:
+def _validate_search_query(search_query: str) -> str | None:
     """Validate search query and return error message if invalid."""
     if not (search_query or "").strip():
         return ERROR_EMPTY_QUERY
     return None
 
 
-def _validate_gmail_connection() -> Optional[str]:
+def _validate_gmail_connection() -> str | None:
     """Validate Gmail connection and return user ID or None."""
     return get_active_gmail_user_id()
 
 
-def _validate_openrouter_config() -> Tuple[Optional[str], Optional[str]]:
+def _validate_openrouter_config() -> tuple[str | None, str | None]:
     """Validate OpenRouter configuration and return (api_key, model) or (None, error)."""
     settings = get_settings()
     api_key = settings.openrouter_api_key
@@ -87,7 +88,7 @@ def _validate_openrouter_config() -> Tuple[Optional[str], Optional[str]]:
 
 
 # Return task tool callables
-def build_registry(agent_name: str) -> Dict[str, Callable[..., Any]]:
+def build_registry(agent_name: str) -> dict[str, Callable[..., Any]]:
     """Return task tool callables."""
 
     return {
@@ -96,7 +97,9 @@ def build_registry(agent_name: str) -> Dict[str, Callable[..., Any]]:
 
 
 # Run an agentic Gmail search for the provided query
-async def task_email_search(search_query: str, memory_id: Optional[str] = None) -> Any:
+async def task_email_search(
+    search_query: str, memory_id: str | None = None
+) -> list[dict[str, Any]] | dict[str, str | None]:
     """Run an agentic Gmail search for the provided query."""
     logger.info(f"[EMAIL_SEARCH] Starting search for: '{search_query}'")
 
@@ -143,15 +146,15 @@ async def _run_email_search(
     composio_user_id: str,
     model: str,
     api_key: str,
-    memory_id: Optional[str],
-) -> List[Dict[str, Any]]:
+    memory_id: str | None,
+) -> list[dict[str, Any]]:
     """Execute the main email search orchestration loop."""
-    messages: List[Dict[str, Any]] = [
+    messages: list[dict[str, Any]] = [
         {"role": "user", "content": _render_user_message(search_query)}
     ]
-    queries: List[str] = []
-    emails: Dict[str, GmailSearchEmail] = {}
-    selected_ids: Optional[List[str]] = None
+    queries: list[str] = []
+    emails: dict[str, GmailSearchEmail] = {}
+    selected_ids: list[str] | None = None
 
     for iteration in range(MAX_LLM_ITERATIONS):
         logger.debug(
@@ -173,7 +176,7 @@ async def _run_email_search(
         tool_calls = assistant.get("tool_calls") or []
 
         # Add assistant message to conversation
-        assistant_entry = {
+        assistant_entry: dict[str, Any] = {
             "role": "assistant",
             "content": assistant.get("content", "") or "",
         }
@@ -234,14 +237,14 @@ def _render_user_message(search_query: str) -> str:
 # Execute tool calls from LLM and process search/completion responses
 async def _execute_tool_calls(
     *,
-    tool_calls: List[Dict[str, Any]],
-    queries: List[str],
-    emails: Dict[str, GmailSearchEmail],
+    tool_calls: Sequence[dict[str, Any]],
+    queries: list[str],
+    emails: dict[str, GmailSearchEmail],
     composio_user_id: str,
-    memory_id: Optional[str],
-) -> Tuple[List[Tuple[str, str]], Optional[List[str]]]:
-    responses: List[Tuple[str, str]] = []
-    completion_ids: Optional[List[str]] = None
+    memory_id: str | None,
+) -> tuple[list[tuple[str, str]], list[str] | None]:
+    responses: list[tuple[str, str]] = []
+    completion_ids: list[str] | None = None
 
     for call in tool_calls:
         call_id = call.get("id") or SEARCH_TOOL_NAME
@@ -308,11 +311,11 @@ async def _execute_tool_calls(
 # Perform Gmail search using Composio and process results
 async def _perform_search(
     *,
-    arguments: Dict[str, Any],
-    queries: List[str],
-    emails: Dict[str, GmailSearchEmail],
+    arguments: dict[str, Any],
+    queries: list[str],
+    emails: dict[str, GmailSearchEmail],
     composio_user_id: str,
-    memory_id: Optional[str],
+    memory_id: str | None,
 ) -> EmailSearchToolResult:
     query = (arguments.get("query") or "").strip()
     if not query:
@@ -384,10 +387,10 @@ async def _perform_search(
 
 # Build final response with selected emails and logging
 def _build_response(
-    queries: List[str],
-    emails: Dict[str, GmailSearchEmail],
+    queries: Sequence[str],
+    emails: dict[str, GmailSearchEmail],
     selected_ids: Sequence[str],
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     # Deduplicate queries while preserving order
     unique_queries = list(dict.fromkeys(queries))
 
@@ -416,12 +419,14 @@ def _build_response(
     return [email.model_dump(exclude_none=True) for email in payload.emails]
 
 
-def _extract_assistant_message(response: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_assistant_message(response: OpenRouterChatCompletion) -> dict[str, Any]:
     """Extract assistant message from OpenRouter API response."""
-    return response.get("choices", [{}])[0].get("message", {})
+    if not response["choices"]:
+        return {}
+    return cast(dict[str, Any], cast(object, response["choices"][0]["message"]))
 
 
-def _parse_arguments(raw_arguments: Any) -> Tuple[Dict[str, Any], Optional[str]]:
+def _parse_arguments(raw_arguments: object) -> tuple[dict[str, Any], str | None]:
     """Parse tool arguments with proper error handling."""
     if isinstance(raw_arguments, dict):
         return raw_arguments, None
@@ -436,8 +441,8 @@ def _parse_arguments(raw_arguments: Any) -> Tuple[Dict[str, Any], Optional[str]]
 
 
 def _handle_completion_tool(
-    arguments: Dict[str, Any],
-) -> Tuple[Optional[List[str]], Dict[str, Any]]:
+    arguments: dict[str, Any],
+) -> tuple[list[str] | None, dict[str, Any]]:
     """Handle completion tool call, parsing message IDs and returning response."""
     raw_ids = arguments.get("message_ids")
     if raw_ids is None:
@@ -451,7 +456,7 @@ def _handle_completion_tool(
     return message_ids, {"status": "success", "message_ids": message_ids}
 
 
-def _safe_json_dumps(payload: Any) -> str:
+def _safe_json_dumps(payload: object) -> str:
     """Safely serialize payload to JSON string."""
     try:
         return json.dumps(payload, ensure_ascii=False)

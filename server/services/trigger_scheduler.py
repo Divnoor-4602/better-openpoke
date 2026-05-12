@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Optional, Set
 
 from ..agents.execution_agent.batch_manager import ExecutionBatchManager
-from ..agents.execution_agent.runtime import ExecutionResult
 from ..logging_config import logger
 from .triggers import TriggerRecord, get_trigger_service
 
@@ -29,9 +27,9 @@ class TriggerScheduler:
     def __init__(self, poll_interval_seconds: float = 10.0) -> None:
         self._poll_interval = poll_interval_seconds
         self._service = get_trigger_service()
-        self._task: Optional[asyncio.Task[None]] = None
+        self._task: asyncio.Task[None] | None = None
         self._running = False
-        self._in_flight: Set[int] = set()
+        self._in_flight: set[int] = set()
         self._lock = asyncio.Lock()
 
     async def start(self) -> None:
@@ -149,7 +147,7 @@ class TriggerScheduler:
         )
 
 
-_scheduler_instance: Optional[TriggerScheduler] = None
+_scheduler_instance: TriggerScheduler | None = None
 
 
 def get_trigger_scheduler() -> TriggerScheduler:
