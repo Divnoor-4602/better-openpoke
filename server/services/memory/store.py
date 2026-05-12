@@ -290,39 +290,65 @@ class MemoryStore:
         recorded_at = self._now()
 
         with self._connect() as conn:
+            event_id = self._new_id("evt")
+            insert_verb = "INSERT OR IGNORE" if idempotency_key else "INSERT"
+            try:
+                conn.execute(
+                    f"""
+                    {insert_verb} INTO events (
+                        event_id, memory_id, idempotency_key, type, timestamp, recorded_at,
+                        source, text, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_id,
+                        resolved_memory_id,
+                        idempotency_key,
+                        type,
+                        timestamp,
+                        recorded_at,
+                        source,
+                        text,
+                        self._dump_json(metadata or {}),
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                if not idempotency_key:
+                    raise
+
             if idempotency_key:
-                existing = conn.execute(
+                row = conn.execute(
                     "SELECT * FROM events WHERE idempotency_key = ?",
                     (idempotency_key,),
                 ).fetchone()
-                if existing is not None:
-                    event = self._event_from_row(conn, existing)
+                if row is None:
+                    raise sqlite3.IntegrityError(
+                        f"Failed to resolve event for idempotency_key={idempotency_key}"
+                    )
+                if str(row["event_id"]) != event_id:
+                    event = self._event_from_row(conn, row)
                     if resolved_memory_id:
-                        self.add_links(
-                            resolved_memory_id, normalized_links, event.event_id
+                        for link in normalized_links:
+                            self._insert_link(
+                                conn,
+                                resolved_memory_id,
+                                event.event_id,
+                                link,
+                                recorded_at,
+                            )
+                        conn.execute(
+                            "UPDATE memories SET updated_at = ? WHERE memory_id = ?",
+                            (recorded_at, resolved_memory_id),
                         )
+                        self._enqueue_index(
+                            conn, "memory", resolved_memory_id, "upsert", recorded_at
+                        )
+                        self._enqueue_index(
+                            conn, "event", event.event_id, "upsert", recorded_at
+                        )
+                        conn.commit()
                     return event
 
-            event_id = self._new_id("evt")
-            conn.execute(
-                """
-                INSERT INTO events (
-                    event_id, memory_id, idempotency_key, type, timestamp, recorded_at,
-                    source, text, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event_id,
-                    resolved_memory_id,
-                    idempotency_key,
-                    type,
-                    timestamp,
-                    recorded_at,
-                    source,
-                    text,
-                    self._dump_json(metadata or {}),
-                ),
-            )
             if resolved_memory_id:
                 conn.execute(
                     "UPDATE memories SET updated_at = ? WHERE memory_id = ?",
@@ -894,6 +920,31 @@ class MemoryStore:
 
         timestamp = self._now()
         idempotency_key = f"{operation}:{entity_type}:{entity_id}"
+        queue_id = self._new_id("idx")
+        try:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO memory_index_queue (
+                    id, idempotency_key, entity_type, entity_id, operation, version, status,
+                    attempts, available_at, max_attempts, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)
+                """,
+                (
+                    queue_id,
+                    idempotency_key,
+                    entity_type,
+                    entity_id,
+                    operation,
+                    version,
+                    timestamp,
+                    get_settings().memory_index_max_attempts,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            pass
+
         existing = conn.execute(
             """
             SELECT id FROM memory_index_queue
@@ -904,7 +955,6 @@ class MemoryStore:
             (idempotency_key,),
         ).fetchone()
         if existing is not None:
-            queue_id = str(existing["id"])
             conn.execute(
                 """
                 UPDATE memory_index_queue
@@ -916,31 +966,9 @@ class MemoryStore:
                     updated_at = ?
                 WHERE id = ?
                 """,
-                (version, timestamp, timestamp, queue_id),
+                (version, timestamp, timestamp, str(existing["id"])),
             )
             return
-
-        queue_id = self._new_id("idx")
-        conn.execute(
-            """
-            INSERT INTO memory_index_queue (
-                id, idempotency_key, entity_type, entity_id, operation, version, status,
-                attempts, available_at, max_attempts, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)
-            """,
-            (
-                queue_id,
-                idempotency_key,
-                entity_type,
-                entity_id,
-                operation,
-                version,
-                timestamp,
-                get_settings().memory_index_max_attempts,
-                timestamp,
-                timestamp,
-            ),
-        )
 
     def _ensure_queue_columns(self, conn: sqlite3.Connection) -> None:
         columns = {

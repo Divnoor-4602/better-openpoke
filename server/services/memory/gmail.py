@@ -36,7 +36,7 @@ def record_gmail_tool_result(
 
     if tool_name == "GMAIL_CREATE_EMAIL_DRAFT":
         memory = _record_gmail_action(
-            type="gmail_draft_created",
+            event_type="gmail_draft_created",
             tool_name=tool_name,
             result=result,
             arguments=arguments,
@@ -49,7 +49,7 @@ def record_gmail_tool_result(
 
     if tool_name == "GMAIL_REPLY_TO_THREAD":
         memory = _record_gmail_action(
-            type="gmail_reply_sent",
+            event_type="gmail_reply_sent",
             tool_name=tool_name,
             result=result,
             arguments=arguments,
@@ -62,7 +62,7 @@ def record_gmail_tool_result(
 
     if tool_name == "GMAIL_SEND_DRAFT":
         memory = _record_gmail_action(
-            type="gmail_draft_sent",
+            event_type="gmail_draft_sent",
             tool_name=tool_name,
             result=result,
             arguments=arguments,
@@ -96,7 +96,7 @@ def record_gmail_message(
     )
     preview_body = _first_str(preview.get("body"), message.get("body"))
     attachments = _attachment_filenames(message.get("payload"))
-    numbers = _numbers(" ".join([subject, preview_body] + attachments))
+    numbers = _numbers(" ".join([subject, preview_body, *attachments]))
 
     links = _compact_links(
         [
@@ -163,7 +163,7 @@ def record_gmail_message(
 
 def _record_gmail_action(
     *,
-    type: str,
+    event_type: str,
     tool_name: str,
     result: dict[str, Any],
     arguments: dict[str, Any] | None,
@@ -173,7 +173,7 @@ def _record_gmail_action(
     payload = _dict_value(result.get("data")) or result
     args = arguments or {}
     thread_id = _find_key(payload, "threadId", "thread_id", "thread_id")
-    if type == "gmail_draft_created":
+    if event_type == "gmail_draft_created":
         message_id = _find_key(payload, "messageId", "message_id")
         draft_id = _first_str(
             _find_key(payload, "draftId", "draft_id", "id"),
@@ -211,7 +211,7 @@ def _record_gmail_action(
         "gmail_draft_created": "Draft email",
         "gmail_reply_sent": "Reply email",
         "gmail_draft_sent": "Sent email",
-    }.get(type, "Email")
+    }.get(event_type, "Email")
     title = _gmail_action_title(action_label, recipient, subject, draft_id)
     summary = _gmail_action_summary(
         action_label=action_label,
@@ -242,7 +242,7 @@ def _record_gmail_action(
         summary=summary,
         metadata={
             "source": "gmail",
-            "last_gmail_action": type,
+            "last_gmail_action": event_type,
             "last_gmail_recipient": recipient,
             "last_gmail_subject": subject,
             "last_gmail_thread_id": thread_id,
@@ -252,9 +252,9 @@ def _record_gmail_action(
     )
 
     id_part = draft_id or message_id or result.get("log_id") or uuid.uuid4().hex
-    idempotency_key = f"{type}:{id_part}"
+    idempotency_key = f"{event_type}:{id_part}"
     store.record_event(
-        type=type,
+        type=event_type,
         text=title,
         memory_id=memory.memory_id,
         idempotency_key=idempotency_key,
@@ -270,7 +270,7 @@ def _record_gmail_action(
         store=store,
         parent_memory_id=memory_id,
         child_memory=memory,
-        action_type=type,
+        action_type=event_type,
         recipient=recipient,
         subject=subject,
         thread_id=thread_id,

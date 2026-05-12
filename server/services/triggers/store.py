@@ -10,6 +10,18 @@ from .models import TriggerRecord
 from .utils import to_storage_timestamp, utc_now
 
 _TriggerFieldValue = str | None
+_ALLOWED_TRIGGER_FIELDS = {
+    "agent_name",
+    "payload",
+    "start_time",
+    "next_trigger",
+    "recurrence_rule",
+    "timezone",
+    "status",
+    "last_error",
+    "created_at",
+    "updated_at",
+}
 
 
 class TriggerStore:
@@ -61,6 +73,7 @@ class TriggerStore:
             conn.execute(index_sql)
 
     def insert(self, payload: Mapping[str, _TriggerFieldValue]) -> int:
+        self._validate_fields(payload)
         with self._lock, self._connect() as conn:
             columns = ", ".join(payload.keys())
             placeholders = ", ".join([":" + key for key in payload.keys()])
@@ -85,6 +98,7 @@ class TriggerStore:
     ) -> bool:
         if not fields:
             return False
+        self._validate_fields(fields)
         assignments = ", ".join(f"{key} = :{key}" for key in fields.keys())
         sql = (
             f"UPDATE triggers SET {assignments}, updated_at = :updated_at"
@@ -99,6 +113,13 @@ class TriggerStore:
         with self._lock, self._connect() as conn:
             cursor = conn.execute(sql, payload)
             return cursor.rowcount > 0
+
+    def _validate_fields(self, fields: Mapping[str, object]) -> None:
+        invalid = set(fields) - _ALLOWED_TRIGGER_FIELDS
+        if invalid:
+            raise ValueError(
+                f"Unsupported trigger field(s): {', '.join(sorted(invalid))}"
+            )
 
     def list_for_agent(self, agent_name: str) -> list[TriggerRecord]:
         with self._lock, self._connect() as conn:

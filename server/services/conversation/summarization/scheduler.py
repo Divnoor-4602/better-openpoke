@@ -30,12 +30,12 @@ async def _run_worker() -> None:
 
     _running = True
     try:
+        summarize_conversation = import_module(
+            "server.services.conversation.summarization.summarizer"
+        ).summarize_conversation
         while _pending:
             _pending = False
             try:
-                summarize_conversation = import_module(
-                    "server.services.conversation.summarization.summarizer"
-                ).summarize_conversation
                 await summarize_conversation()
             except Exception as exc:  # pragma: no cover - defensive
                 logger.error(

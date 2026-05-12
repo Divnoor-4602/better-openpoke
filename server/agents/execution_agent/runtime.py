@@ -190,7 +190,7 @@ class ExecutionAgentRuntime:
                         memory_id=self.memory_id,
                         tool_call_id=resolved_call_id,
                         tool_name=tool_name,
-                        input=tool_args,
+                        tool_input=tool_args,
                     )
                     should_record_tool_memory = self._should_record_tool_memory(
                         tool_name
@@ -200,7 +200,7 @@ class ExecutionAgentRuntime:
                             type="tool_call",
                             text=f"Calling {tool_name}",
                             memory_id=self.memory_id,
-                            idempotency_key=f"tool_call:{self.run_id}:{call_id or tool_name}",
+                            idempotency_key=f"tool_call:{self.run_id}:{resolved_call_id}",
                             source="execution_agent",
                             metadata={"tool_name": tool_name, "arguments": tool_args},
                         )
@@ -240,7 +240,7 @@ class ExecutionAgentRuntime:
                             type="tool_result",
                             text=f"{tool_name}: {record_payload[:500]}",
                             memory_id=self.memory_id,
-                            idempotency_key=f"tool_result:{self.run_id}:{call_id or tool_name}",
+                            idempotency_key=f"tool_result:{self.run_id}:{resolved_call_id}",
                             source="execution_agent",
                             metadata={
                                 "tool_name": tool_name,

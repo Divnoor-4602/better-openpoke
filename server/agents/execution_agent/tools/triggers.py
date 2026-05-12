@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from functools import partial
 from typing import Any
@@ -93,6 +94,7 @@ _SCHEMAS: list[dict[str, Any]] = [
 
 _LOG_STORE = get_execution_agent_logs()
 _TRIGGER_SERVICE = get_trigger_service()
+_INTEGER_PATTERN = re.compile(r"^-?\d+$")
 
 
 # Return trigger tool schemas
@@ -174,11 +176,13 @@ def _update_trigger_tool(
     start_time: str | None = None,
     status: str | None = None,
 ) -> dict[str, Any]:
-    if not isinstance(trigger_id, str | int | float):
+    if isinstance(trigger_id, bool):
         return {"error": "trigger_id must be an integer"}
-    try:
+    if isinstance(trigger_id, int):
+        trigger_id_int = trigger_id
+    elif isinstance(trigger_id, str) and _INTEGER_PATTERN.fullmatch(trigger_id.strip()):
         trigger_id_int = int(trigger_id)
-    except (TypeError, ValueError):
+    else:
         return {"error": "trigger_id must be an integer"}
 
     try:

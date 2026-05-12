@@ -229,6 +229,7 @@ TOOL_SCHEMAS: list[_JsonObject] = [
 ]
 
 _execution_batch_manager: ExecutionBatchManager | None = None
+_running_tasks: set[asyncio.Task[None]] = set()
 
 
 def _get_execution_batch_manager() -> ExecutionBatchManager:
@@ -530,7 +531,9 @@ def _record_and_submit_execution(
         logger.error("No running event loop available for async execution")
         return ToolResult(success=False, payload={"error": "No event loop available"})
 
-    _ = loop.create_task(_execute_async())
+    task = loop.create_task(_execute_async())
+    _running_tasks.add(task)
+    task.add_done_callback(_running_tasks.discard)
     return ToolResult(success=True, payload={"status": "submitted"})
 
 

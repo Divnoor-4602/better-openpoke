@@ -213,7 +213,15 @@ class EmailTextCleaner:
                                     return base64.urlsafe_b64decode(data).decode(
                                         "utf-8", errors="replace"
                                     )
-                                except Exception:
+                                except Exception as exc:
+                                    logger.debug(
+                                        "Failed to decode Gmail html body part",
+                                        extra={
+                                            "error": str(exc),
+                                            "payload_type": type(data).__name__,
+                                            "payload_preview": data[:24],
+                                        },
+                                    )
                                     continue
         html_body = message.get("htmlBody")
         return html_body if isinstance(html_body, str) else None
@@ -233,7 +241,15 @@ class EmailTextCleaner:
                         return base64.urlsafe_b64decode(data).decode(
                             "utf-8", errors="replace"
                         )
-                    except Exception:
+                    except Exception as exc:
+                        logger.debug(
+                            "Failed to decode Gmail plain body",
+                            extra={
+                                "error": str(exc),
+                                "payload_type": type(data).__name__,
+                                "payload_preview": data[:24],
+                            },
+                        )
                         pass
         text_body = message.get("textBody")
         return text_body if isinstance(text_body, str) else None

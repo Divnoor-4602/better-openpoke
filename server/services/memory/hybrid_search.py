@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from contextlib import closing
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from os import PathLike
@@ -85,7 +86,7 @@ def hybrid_candidates(
     top_k: int = 60,
 ) -> list[SearchCandidate]:
     candidates: list[SearchCandidate] = []
-    with _connect(db_path) as conn:
+    with closing(_connect(db_path)) as conn:
         exact = exact_link_candidates(conn, query)
         pinecone = pinecone_candidates(query, top_k=top_k)
         recent = recent_unindexed_candidates(conn)

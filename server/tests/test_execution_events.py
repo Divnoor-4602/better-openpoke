@@ -38,7 +38,7 @@ class ExecutionEventStoreTests(unittest.TestCase):
             memory_id="mem-1",
             tool_call_id="tool-1",
             tool_name="GMAIL_CREATE_EMAIL_DRAFT",
-            input={"recipient_email": "alice@example.com"},
+            tool_input={"recipient_email": "alice@example.com"},
         )
         self.store.record_tool_result(
             request_id="req-1",

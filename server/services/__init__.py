@@ -44,4 +44,4 @@ def __getattr__(name: str) -> Any:
     return getattr(module, attr_name)
 
 
-__all__ = sorted(_EXPORTS)
+__all__ = tuple(sorted(_EXPORTS))

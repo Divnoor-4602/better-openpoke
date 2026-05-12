@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from contextlib import closing
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -142,7 +143,7 @@ class MemoryIndexer:
             return 0
 
         synced = 0
-        with _connect(self._db_path) as conn:
+        with closing(_connect(self._db_path)) as conn:
             rows = _claim_rows(conn, limit)
             if not rows:
                 return 0
@@ -260,7 +261,7 @@ class MemoryIndexer:
         return synced
 
     def queue_stats(self) -> dict[str, object]:
-        with _connect(self._db_path) as conn:
+        with closing(_connect(self._db_path)) as conn:
             return queue_stats(conn)
 
 
@@ -327,7 +328,9 @@ def _embed_documents(pc: Any, docs: list[PineconeDocument]) -> list[dict[str, ob
         },
     )
     vectors: list[dict[str, object]] = []
-    for doc, dense, sparse in zip(docs, dense_embeddings, sparse_embeddings):
+    for doc, dense, sparse in zip(
+        docs, dense_embeddings, sparse_embeddings, strict=True
+    ):
         vectors.append(
             {
                 "id": doc.id,

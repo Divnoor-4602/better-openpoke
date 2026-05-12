@@ -11,6 +11,8 @@ from ...logging_config import logger
 from ...services.execution import get_execution_event_store
 from .runtime import ExecutionAgentRuntime, ExecutionResult
 
+_running_tasks: set[asyncio.Task[object]] = set()
+
 
 @dataclass
 class PendingExecution:
@@ -180,7 +182,7 @@ class ExecutionBatchManager:
 
         if dispatch_payload:
             await self._dispatch_to_interaction_agent(dispatch_payload)
-        elif not notify_user:
+        else:
             self._record_status_for_interaction_context(result)
 
     # Return list of currently pending execution requests for monitoring purposes
@@ -239,7 +241,9 @@ class ExecutionBatchManager:
             asyncio.run(runtime.handle_agent_message(payload))
             return
 
-        loop.create_task(runtime.handle_agent_message(payload))
+        task = loop.create_task(runtime.handle_agent_message(payload))
+        _running_tasks.add(task)
+        task.add_done_callback(_running_tasks.discard)
 
     def _record_status_for_interaction_context(self, result: ExecutionResult) -> None:
         """Store worker status in hidden conversation context without chatting."""

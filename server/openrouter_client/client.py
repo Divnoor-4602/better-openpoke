@@ -240,7 +240,8 @@ async def stream_chat_completion(
     url = f"{base_url.rstrip('/')}/chat/completions"
     headers = {**_headers(api_key=api_key), "Accept": "text/event-stream"}
 
-    async with httpx.AsyncClient(timeout=None) as client:
+    timeout = httpx.Timeout(connect=300.0, write=300.0, read=None, pool=300.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
         try:
             async with client.stream(
                 "POST", url, headers=headers, json=payload

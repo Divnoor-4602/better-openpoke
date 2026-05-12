@@ -112,7 +112,7 @@ class ExecutionEventStore:
             request_id=request_id,
             memory_id=memory_id,
             parent_memory_id=parent_memory_id,
-            type="status",
+            event_type="status",
             state="queued",
             text=instructions,
         )
@@ -128,7 +128,7 @@ class ExecutionEventStore:
         self.record_event(
             request_id=request_id,
             memory_id=memory_id,
-            type="status",
+            event_type="status",
             state="running",
             text="Execution started",
         )
@@ -140,16 +140,16 @@ class ExecutionEventStore:
         memory_id: str,
         tool_call_id: str,
         tool_name: str,
-        input: JsonValue,
+        tool_input: JsonValue,
     ) -> None:
         self.record_event(
             request_id=request_id,
             memory_id=memory_id,
-            type="tool-call",
+            event_type="tool-call",
             state="input-available",
             tool_call_id=tool_call_id,
             tool_name=tool_name,
-            input=input,
+            input_data=tool_input,
         )
 
     def record_tool_result(
@@ -166,7 +166,7 @@ class ExecutionEventStore:
         self.record_event(
             request_id=request_id,
             memory_id=memory_id,
-            type="tool-result",
+            event_type="tool-result",
             state="output-available" if ok else "output-error",
             tool_call_id=tool_call_id,
             tool_name=tool_name,
@@ -195,7 +195,7 @@ class ExecutionEventStore:
         self.record_event(
             request_id=request_id,
             memory_id=memory_id,
-            type="agent-response",
+            event_type="agent-response",
             state="output-available" if ok else "output-error",
             text=response,
             error=error,
@@ -203,7 +203,7 @@ class ExecutionEventStore:
         self.record_event(
             request_id=request_id,
             memory_id=memory_id,
-            type="status",
+            event_type="status",
             state=status,
             text=status,
             error=error,
@@ -214,25 +214,25 @@ class ExecutionEventStore:
         *,
         request_id: str,
         memory_id: str,
-        type: ExecutionEventType,
+        event_type: ExecutionEventType,
         state: ExecutionEventState | None = None,
         parent_memory_id: str | None = None,
         tool_call_id: str | None = None,
         tool_name: str | None = None,
         text: str | None = None,
-        input: JsonValue = None,
+        input_data: JsonValue = None,
         output: JsonValue = None,
         error: str | None = None,
     ) -> None:
         timestamp = self._now()
         event: ExecutionEvent = {
             "id": None,
-            "type": type,
+            "type": event_type,
             "state": state,
             "toolCallId": tool_call_id,
             "toolName": tool_name,
             "text": text,
-            "input": input,
+            "input": input_data,
             "output": output,
             "error": error,
             "createdAt": timestamp,
@@ -257,12 +257,12 @@ class ExecutionEventStore:
                     request_id,
                     memory_id,
                     parent_memory_id,
-                    type,
+                    event_type,
                     state,
                     tool_call_id,
                     tool_name,
                     text,
-                    self._dump_json(input),
+                    self._dump_json(input_data),
                     self._dump_json(output),
                     error,
                     timestamp,

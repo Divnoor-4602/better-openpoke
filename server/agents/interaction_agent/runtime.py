@@ -153,10 +153,11 @@ class InteractionAgentRuntime:
         """Handle a user message and emit AI SDK UI Message Stream SSE parts."""
 
         execution_store = get_execution_event_store()
-        subscription = execution_store.subscribe(set())
-        message_id = f"msg-{uuid.uuid4()}"
-        yield ui_stream.sse_part(ui_stream.start_message(message_id))
+        subscription: ExecutionEventSubscription | None = None
         try:
+            subscription = execution_store.subscribe(set())
+            message_id = f"msg-{uuid.uuid4()}"
+            yield ui_stream.sse_part(ui_stream.start_message(message_id))
             transcript_before = self._load_conversation_transcript()
             recent_transcript = self._load_recent_conversation_transcript()
             self.conversation_log.record_user_message(user_message)
@@ -181,10 +182,12 @@ class InteractionAgentRuntime:
         except Exception as exc:
             logger.exception(f"Streaming interaction agent failed: {exc}")
             yield ui_stream.sse_part(ui_stream.error_part(str(exc)))
-        finally:
-            get_execution_event_store().unsubscribe(subscription)
+        else:
             yield ui_stream.sse_part(ui_stream.finish_message())
             yield ui_stream.DONE
+        finally:
+            if subscription is not None:
+                get_execution_event_store().unsubscribe(subscription)
 
     # Handle incoming messages from execution agents and generate appropriate responses
     async def handle_agent_message(self, agent_message: str) -> InteractionResult:

@@ -111,7 +111,7 @@ async def task_email_search(
 
     composio_user_id = _validate_gmail_connection()
     if not composio_user_id:
-        logger.error(f"[EMAIL_SEARCH] Gmail not connected")
+        logger.error("[EMAIL_SEARCH] Gmail not connected")
         return {"error": ERROR_GMAIL_NOT_CONNECTED}
 
     api_key, model_or_error = _validate_openrouter_config()
@@ -395,12 +395,18 @@ def _build_response(
     unique_queries = list(dict.fromkeys(queries))
 
     # Deduplicate and filter valid email IDs efficiently
-    valid_ids = [id.strip() for id in selected_ids if id and id.strip()]
+    valid_ids = [
+        selected_id.strip()
+        for selected_id in selected_ids
+        if selected_id and selected_id.strip()
+    ]
     unique_ids = list(dict.fromkeys(valid_ids))
-    selected_emails = [emails[id] for id in unique_ids if id in emails]
+    selected_emails = [
+        emails[email_id] for email_id in unique_ids if email_id in emails
+    ]
 
     # Log any missing email IDs
-    missing_ids = [id for id in unique_ids if id not in emails]
+    missing_ids = [email_id for email_id in unique_ids if email_id not in emails]
     if missing_ids:
         logger.warning(
             f"[EMAIL_SEARCH] {len(missing_ids)} selected email IDs not found"

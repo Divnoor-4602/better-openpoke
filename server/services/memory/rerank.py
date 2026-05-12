@@ -40,7 +40,7 @@ def rerank_candidates(
             model=RERANK_MODEL,
             query=query,
             documents=documents,
-            top_n=min(len(documents), max(limit * 3, limit)),
+            top_n=min(len(documents), limit * 3),
             return_documents=True,
             parameters={"truncate": "END"},
         )
@@ -49,7 +49,7 @@ def rerank_candidates(
             extra={
                 "candidates": len(candidates),
                 "rerankable": len(rerankable),
-                "returned": min(len(documents), max(limit * 3, limit)),
+                "returned": min(len(documents), limit * 3),
                 "rerank_ms": round((perf_counter() - started) * 1000, 2),
             },
         )

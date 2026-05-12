@@ -18,12 +18,12 @@ class ChatMessage(BaseModel):
         if not isinstance(data, dict):
             return data
 
-        raw_data = cast(dict[object, object], data)
+        raw_data = cast(dict[str, object], data)
         if "content" not in raw_data:
             return raw_data
 
-        coerced = {str(key): value for key, value in raw_data.items()}
-        content = coerced["content"]
+        coerced = raw_data.copy()
+        content = raw_data["content"]
         coerced["content"] = "" if content is None else str(content)
         return coerced
 

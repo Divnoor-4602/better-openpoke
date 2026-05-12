@@ -167,9 +167,12 @@ def _coerce_arguments(raw: object) -> dict[str, object] | None:
         if not raw.strip():
             return {}
         try:
-            return cast(dict[str, object], json.loads(raw))
+            parsed = json.loads(raw)
         except json.JSONDecodeError:
             return None
+        if not isinstance(parsed, dict):
+            raise ValueError("Importance classifier arguments must be a JSON object")
+        return cast(dict[str, object], parsed)
     return None
 
 

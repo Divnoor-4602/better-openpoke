@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from .config import get_settings
 from .logging_config import configure_logging, logger
-from .routes import api_router
+from .routes import api_router, v1_router
 from .services.gmail.importance_watcher import get_important_email_watcher
 from .services.memory.worker import get_memory_index_worker
 from .services.trigger_scheduler import get_trigger_scheduler
@@ -105,6 +105,16 @@ app.add_middleware(
 
 register_exception_handlers(app)
 app.include_router(api_router)
+app.include_router(v1_router)
+
+
+@app.middleware("http")
+async def add_v1_deprecation_header(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/v1"):
+        response.headers["Deprecation"] = "true"
+        response.headers["Link"] = '</api>; rel="successor-version"'
+    return response
 
 
 __all__ = ["app"]
