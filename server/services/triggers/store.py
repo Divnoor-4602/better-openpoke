@@ -10,7 +10,7 @@ from .models import TriggerRecord
 from .utils import to_storage_timestamp, utc_now
 
 _TriggerFieldValue = str | None
-_ALLOWED_TRIGGER_FIELDS = {
+_INSERTABLE_TRIGGER_FIELDS = {
     "agent_name",
     "payload",
     "start_time",
@@ -22,6 +22,7 @@ _ALLOWED_TRIGGER_FIELDS = {
     "created_at",
     "updated_at",
 }
+_UPDATABLE_TRIGGER_FIELDS = _INSERTABLE_TRIGGER_FIELDS - {"agent_name", "created_at"}
 
 
 class TriggerStore:
@@ -73,7 +74,7 @@ class TriggerStore:
             conn.execute(index_sql)
 
     def insert(self, payload: Mapping[str, _TriggerFieldValue]) -> int:
-        self._validate_fields(payload)
+        self._validate_fields(payload, _INSERTABLE_TRIGGER_FIELDS)
         with self._lock, self._connect() as conn:
             columns = ", ".join(payload.keys())
             placeholders = ", ".join([":" + key for key in payload.keys()])
@@ -98,7 +99,7 @@ class TriggerStore:
     ) -> bool:
         if not fields:
             return False
-        self._validate_fields(fields)
+        self._validate_fields(fields, _UPDATABLE_TRIGGER_FIELDS)
         assignments = ", ".join(f"{key} = :{key}" for key in fields.keys())
         sql = (
             f"UPDATE triggers SET {assignments}, updated_at = :updated_at"
@@ -114,8 +115,8 @@ class TriggerStore:
             cursor = conn.execute(sql, payload)
             return cursor.rowcount > 0
 
-    def _validate_fields(self, fields: Mapping[str, object]) -> None:
-        invalid = set(fields) - _ALLOWED_TRIGGER_FIELDS
+    def _validate_fields(self, fields: Mapping[str, object], allowed: set[str]) -> None:
+        invalid = set(fields) - allowed
         if invalid:
             raise ValueError(
                 f"Unsupported trigger field(s): {', '.join(sorted(invalid))}"
@@ -137,7 +138,7 @@ class TriggerStore:
             " AND next_trigger <= ?"
         )
         params: list[str] = [before_iso]
-        if agent_name:
+        if agent_name is not None:
             sql += " AND agent_name = ?"
             params.append(agent_name)
         sql += " ORDER BY next_trigger, id"

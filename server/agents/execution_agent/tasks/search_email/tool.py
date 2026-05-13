@@ -282,7 +282,6 @@ async def _execute_tool_calls(
                 queries=queries,
                 emails=emails,
                 composio_user_id=composio_user_id,
-                memory_id=memory_id,
             )
             response_data = result_model.model_dump(exclude_none=True)
 
@@ -315,7 +314,6 @@ async def _perform_search(
     queries: list[str],
     emails: dict[str, GmailSearchEmail],
     composio_user_id: str,
-    memory_id: str | None,
 ) -> EmailSearchToolResult:
     query = (arguments.get("query") or "").strip()
     if not query:

@@ -25,7 +25,8 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         logger.debug(
-            "validation error", extra={"errors": exc.errors(), "path": str(request.url)}
+            "validation error",
+            extra={"errors": exc.errors(), "path": request.url.path},
         )
         return JSONResponse(
             {"ok": False, "error": "Invalid request", "detail": exc.errors()},
@@ -43,11 +44,17 @@ def register_exception_handlers(app: FastAPI) -> None:
             extra={
                 "detail": exc.detail,
                 "status": exc.status_code,
-                "path": str(request.url),
+                "path": request.url.path,
             },
         )
         raw_detail = cast(object, exc.detail)
-        detail = raw_detail if isinstance(raw_detail, str) else json.dumps(raw_detail)
+        if isinstance(raw_detail, str):
+            detail = raw_detail
+        else:
+            try:
+                detail = json.dumps(raw_detail)
+            except (TypeError, ValueError):
+                detail = repr(raw_detail)
         return JSONResponse({"ok": False, "error": detail}, status_code=exc.status_code)
 
     _ = _http_exception_handler
@@ -57,7 +64,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: Exception
     ) -> JSONResponse:
         _ = exc
-        logger.exception("Unhandled error", extra={"path": str(request.url)})
+        logger.exception("Unhandled error", extra={"path": request.url.path})
         return JSONResponse(
             {"ok": False, "error": "Internal server error"},
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -73,18 +80,27 @@ _settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _ = app
-    scheduler = get_trigger_scheduler()
-    watcher = get_important_email_watcher()
-    memory_index_worker = await get_memory_index_worker()
-    await scheduler.start()
-    await watcher.start()
-    await memory_index_worker.start()
+    started_services: list[object] = []
     try:
+        scheduler = get_trigger_scheduler()
+        watcher = get_important_email_watcher()
+        memory_index_worker = await get_memory_index_worker()
+        for service in (scheduler, watcher, memory_index_worker):
+            await service.start()
+            started_services.append(service)
         yield
     finally:
-        await memory_index_worker.stop()
-        await scheduler.stop()
-        await watcher.stop()
+        for service in reversed(started_services):
+            try:
+                await service.stop()
+            except Exception as exc:  # pragma: no cover - defensive shutdown
+                logger.warning(
+                    "service shutdown failed",
+                    extra={
+                        "service": service.__class__.__name__,
+                        "error": str(exc),
+                    },
+                )
 
 
 app = FastAPI(
@@ -111,7 +127,8 @@ app.include_router(v1_router)
 @app.middleware("http")
 async def add_v1_deprecation_header(request: Request, call_next):
     response = await call_next(request)
-    if request.url.path.startswith("/api/v1"):
+    path = request.url.path
+    if path == "/api/v1" or path.startswith("/api/v1/"):
         response.headers["Deprecation"] = "true"
         response.headers["Link"] = '</api>; rel="successor-version"'
     return response

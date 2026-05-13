@@ -585,14 +585,22 @@ class InteractionAgentRuntime:
 
     def _message_text_payloads(
         self, messages: Sequence[Mapping[str, object]]
-    ) -> list[Mapping[str, str]]:
-        return [
-            {
+    ) -> list[Mapping[str, object]]:
+        payloads: list[Mapping[str, object]] = []
+        for message in messages:
+            payload: dict[str, object] = {
                 "role": str(message.get("role") or ""),
                 "content": str(message.get("content") or ""),
             }
-            for message in messages
-        ]
+            if "tool_calls" in message:
+                payload["tool_calls"] = message.get("tool_calls")
+            if "tool_call_id" in message:
+                tool_call_id = message.get("tool_call_id")
+                payload["tool_call_id"] = (
+                    str(tool_call_id) if tool_call_id is not None else None
+                )
+            payloads.append(payload)
+        return payloads
 
     def _log_prompt_payload(
         self,

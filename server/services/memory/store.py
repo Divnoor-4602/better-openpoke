@@ -78,6 +78,8 @@ class MemoryStore:
 
     def __init__(self, db_path: Path = _MEMORY_DB_PATH) -> None:
         self._db_path = db_path
+        # Used for schema and migration setup; SQLite write conflicts are handled
+        # by per-connection transactions and atomic insert paths.
         self._lock = threading.Lock()
         self._ensure_schema()
 
@@ -815,6 +817,8 @@ class MemoryStore:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         return conn
 
     def _memory_from_row(

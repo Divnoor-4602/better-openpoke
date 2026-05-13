@@ -685,22 +685,42 @@ def handle_tool_call(name: str, arguments: object) -> ToolResult:
             )
 
         if name == "send_message_to_agent":
+            error = _validate_required(args, {"instructions": str})
+            if error:
+                return error
             return send_message_to_agent(
                 **cast(_SendMessageToAgentArgs, cast(object, args))
             )
         if name == "send_messages_to_agents":
+            error = _validate_required(args, {"items": list})
+            if error:
+                return error
             return send_messages_to_agents(
                 **cast(_SendMessagesToAgentsArgs, cast(object, args))
             )
         if name == "search_memory":
+            error = _validate_required(args, {"query": str})
+            if error:
+                return error
+            if "limit" in args and not isinstance(args["limit"], int):
+                return _invalid_argument("limit")
             return search_memory(**cast(_SearchMemoryArgs, cast(object, args)))
         if name == "send_message_to_user":
+            error = _validate_required(args, {"message": str})
+            if error:
+                return error
             return send_message_to_user(
                 **cast(_SendMessageToUserArgs, cast(object, args))
             )
         if name == "send_draft":
+            error = _validate_required(args, {"to": str, "subject": str, "body": str})
+            if error:
+                return error
             return send_draft(**cast(_SendDraftArgs, cast(object, args)))
         if name == "wait":
+            error = _validate_required(args, {"reason": str})
+            if error:
+                return error
             return wait(**cast(_WaitArgs, cast(object, args)))
 
         logger.warning("unexpected tool", extra={"tool": name})
@@ -714,6 +734,23 @@ def handle_tool_call(name: str, arguments: object) -> ToolResult:
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("tool call failed", extra={"tool": name, "error": str(exc)})
         return ToolResult(success=False, payload={"error": "Failed to execute"})
+
+
+def _validate_required(
+    args: Mapping[str, object],
+    required: Mapping[str, type],
+) -> ToolResult | None:
+    for field, expected_type in required.items():
+        if field not in args or not isinstance(args[field], expected_type):
+            return _invalid_argument(field)
+    return None
+
+
+def _invalid_argument(field: str) -> ToolResult:
+    return ToolResult(
+        success=False,
+        payload={"error": f"Missing or invalid arguments: {field}"},
+    )
 
 
 def _serialize_memory_result(result: MemorySearchResult) -> dict[str, object]:

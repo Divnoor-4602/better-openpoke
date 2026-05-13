@@ -241,9 +241,19 @@ class ExecutionBatchManager:
             asyncio.run(runtime.handle_agent_message(payload))
             return
 
+        def _handle_dispatch_done(task: asyncio.Task[object]) -> None:
+            _running_tasks.discard(task)
+            try:
+                _ = task.result()
+            except Exception as exc:  # pragma: no cover - background task failure
+                logger.exception(
+                    "interaction agent dispatch failed",
+                    extra={"error": str(exc), "payload": payload[:500]},
+                )
+
         task = loop.create_task(runtime.handle_agent_message(payload))
         _running_tasks.add(task)
-        task.add_done_callback(_running_tasks.discard)
+        task.add_done_callback(_handle_dispatch_done)
 
     def _record_status_for_interaction_context(self, result: ExecutionResult) -> None:
         """Store worker status in hidden conversation context without chatting."""
