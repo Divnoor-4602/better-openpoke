@@ -5,7 +5,8 @@
   "workspaces": [
     "web",
     "server",
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "dev": "turbo dev --ui=tui",
