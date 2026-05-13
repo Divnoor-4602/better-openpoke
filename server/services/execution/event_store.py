@@ -252,6 +252,24 @@ class ExecutionEventStore:
             "event": event,
         }
         with self._lock, self._connect() as conn:
+            run = cast(
+                sqlite3.Row | None,
+                conn.execute(
+                    "SELECT title, thread_id, parent_memory_id FROM execution_runs WHERE request_id = ?",
+                    (request_id,),
+                ).fetchone(),
+            )
+            if run is not None:
+                title_value = self._row_value(run, "title")
+                thread_id_value = self._row_value(run, "thread_id")
+                parent_memory_id_value = self._row_value(run, "parent_memory_id")
+                payload["title"] = str(title_value)
+                thread_id = thread_id or self._optional_str(thread_id_value)
+                parent_memory_id = parent_memory_id or self._optional_str(
+                    parent_memory_id_value
+                )
+                payload["threadId"] = thread_id
+                payload["parentMemoryId"] = parent_memory_id
             cursor = conn.execute(
                 """
                 INSERT INTO execution_events (
@@ -281,24 +299,6 @@ class ExecutionEventStore:
                 "UPDATE execution_runs SET updated_at = ? WHERE request_id = ?",
                 (timestamp, request_id),
             )
-            run = cast(
-                sqlite3.Row | None,
-                conn.execute(
-                    "SELECT title, thread_id, parent_memory_id FROM execution_runs WHERE request_id = ?",
-                    (request_id,),
-                ).fetchone(),
-            )
-            if run is not None:
-                title_value = self._row_value(run, "title")
-                thread_id_value = self._row_value(run, "thread_id")
-                parent_memory_id_value = self._row_value(run, "parent_memory_id")
-                payload["title"] = str(title_value)
-                payload["threadId"] = payload["threadId"] or self._optional_str(
-                    thread_id_value
-                )
-                payload["parentMemoryId"] = payload[
-                    "parentMemoryId"
-                ] or self._optional_str(parent_memory_id_value)
             conn.commit()
             subscriptions = list(self._subscriptions)
         for subscription in subscriptions:
@@ -359,8 +359,10 @@ class ExecutionEventStore:
         return [self._event_row_to_part(row) for row in cast(list[sqlite3.Row], rows)]
 
     def list_runs(
-        self, *, limit: int = 30, thread_id: str | None = None
+        self, *, limit: int = 30, offset: int = 0, thread_id: str | None = None
     ) -> list[ExecutionRun]:
+        safe_limit = max(1, min(limit, 500))
+        safe_offset = max(0, offset)
         with self._lock, self._connect() as conn:
             if thread_id is None:
                 rows = conn.execute(
@@ -368,9 +370,9 @@ class ExecutionEventStore:
                     SELECT *
                     FROM execution_runs
                     ORDER BY updated_at DESC
-                    LIMIT ?
+                    LIMIT ? OFFSET ?
                     """,
-                    (max(1, min(limit, 500)),),
+                    (safe_limit, safe_offset),
                 ).fetchall()
             else:
                 rows = conn.execute(
@@ -379,9 +381,9 @@ class ExecutionEventStore:
                     FROM execution_runs
                     WHERE thread_id = ?
                     ORDER BY updated_at DESC
-                    LIMIT ?
+                    LIMIT ? OFFSET ?
                     """,
-                    (thread_id, max(1, min(limit, 500))),
+                    (thread_id, safe_limit, safe_offset),
                 ).fetchall()
             rows = cast(list[sqlite3.Row], rows)
             request_ids = [str(self._row_value(row, "request_id")) for row in rows]

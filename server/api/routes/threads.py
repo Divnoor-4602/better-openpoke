@@ -89,8 +89,14 @@ def update_thread(
     payload: ThreadUpdateRequest,
     repository: ThreadRepository = Depends(get_thread_repository),
 ) -> ThreadResponse:
+    trimmed_title = payload.title.strip()
+    if trimmed_title == "":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Title must not be empty or whitespace only",
+        )
     try:
-        thread = repository.update_thread(threadId, title=payload.title.strip())
+        thread = repository.update_thread(threadId, title=trimmed_title)
     except ThreadNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found") from exc
     return ThreadResponse(thread=thread_resource(thread))
@@ -201,6 +207,9 @@ async def stream_thread_message(
             parts=user_message.serializable_parts(),
         )
         runtime = InteractionAgentRuntime()
+    except ThreadNotFoundError as exc:
+        logger.error("thread not found", extra={"error": str(exc)})
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         logger.error("configuration error", extra={"error": str(exc)})
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -232,9 +241,13 @@ def list_thread_agent_runs(
     from ...services.execution import get_execution_event_store
 
     offset = decode_cursor(cursor)
-    runs = get_execution_event_store().list_runs(limit=offset + limit, thread_id=threadId)
-    page_items = runs[offset : offset + limit]
-    next_offset = offset + limit if len(runs) > offset + limit else None
+    runs = get_execution_event_store().list_runs(
+        limit=limit + 1,
+        offset=offset,
+        thread_id=threadId,
+    )
+    page_items = runs[:limit]
+    next_offset = offset + limit if len(runs) > limit else None
     return AgentRunListResponse(
         items=[agent_run_resource(run) for run in page_items],
         page=CursorPage(nextCursor=encode_cursor(next_offset), limit=limit),

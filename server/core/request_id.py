@@ -20,9 +20,9 @@ async def request_id_middleware(
     call_next: Callable[[Request], object],
 ) -> Response:
     incoming = request.headers.get(REQUEST_ID_HEADER)
-    request_id = incoming.strip() if incoming else str(uuid.uuid4())
+    stripped = incoming.strip() if incoming else ""
+    request_id = stripped or str(uuid.uuid4())
     request.state.request_id = request_id
     response = await call_next(request)
     response.headers[REQUEST_ID_HEADER] = request_id
     return response
-

@@ -8,13 +8,16 @@ import perfectionist from 'eslint-plugin-perfectionist'
 import prettier from 'eslint-plugin-prettier'
 import react from 'eslint-plugin-react'
 import reactHooks from 'eslint-plugin-react-hooks'
-import { readdirSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 
-const featureDirs = readdirSync(new URL('./src/features', import.meta.url), {
-  withFileTypes: true,
-})
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => entry.name)
+const featuresUrl = new URL('./src/features', import.meta.url)
+const featureDirs = existsSync(featuresUrl)
+  ? readdirSync(featuresUrl, {
+      withFileTypes: true,
+    })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+  : []
 
 const featureIsolationZones = featureDirs.map((featureName) => ({
   except: [`./${featureName}`],

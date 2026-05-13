@@ -22,7 +22,7 @@
     }
   },
   "scripts": {
-    "generate": "/Users/divnoor/anaconda3/envs/better-openpoke/bin/python ../../server/scripts/export_openapi.py --output ../../server/generated/openapi.json && openapi-ts",
+    "generate": "python3 ../../server/scripts/export_openapi.py --output ../../server/generated/openapi.json && openapi-ts",
     "build": "tsc --noEmit",
     "check": "bun run generate && git diff --exit-code -- src/generated && bun run build"
   },

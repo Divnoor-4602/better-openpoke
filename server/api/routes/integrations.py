@@ -125,8 +125,9 @@ def _ok_payload(response: JSONResponse) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid provider response")
     if response.status_code >= 400 or data.get("ok") is False:
+        status_code = response.status_code if response.status_code >= 400 else status.HTTP_502_BAD_GATEWAY
         raise HTTPException(
-            status_code=response.status_code,
+            status_code=status_code,
             detail=data.get("detail") or data.get("error") or "Integration request failed",
         )
     return data

@@ -55,7 +55,7 @@ def register_exception_handlers(app: object) -> None:
     ) -> JSONResponse:
         logger.debug(
             "validation error",
-            extra={"errors": exc.errors(), "path": request.url.path},
+            extra={"errors": _sanitize_validation_errors(exc.errors()), "path": request.url.path},
         )
         return error_response(
             request,
@@ -73,7 +73,7 @@ def register_exception_handlers(app: object) -> None:
         logger.debug(
             "http error",
             extra={
-                "detail": exc.detail,
+                "detail": _redact_detail(exc.detail),
                 "status": exc.status_code,
                 "path": request.url.path,
             },
@@ -112,3 +112,30 @@ ERROR_RESPONSES = {
     500: {"model": ErrorResponse, "description": "Internal server error"},
 }
 
+
+def _sanitize_validation_errors(errors: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sanitized_errors: list[dict[str, Any]] = []
+    for error in errors:
+        sanitized = {
+            key: value
+            for key, value in error.items()
+            if key not in {"input", "ctx"}
+        }
+        sanitized_errors.append(sanitized)
+    return sanitized_errors
+
+
+def _redact_detail(detail: Any) -> Any:
+    if isinstance(detail, list):
+        return {
+            "type": "list",
+            "count": len(detail),
+            "items": [_redact_detail(item) for item in detail],
+        }
+    if isinstance(detail, dict):
+        return {
+            key: _redact_detail(value)
+            for key, value in detail.items()
+            if key not in {"input", "ctx"}
+        }
+    return {"type": type(detail).__name__}

@@ -15,18 +15,24 @@ from server.app import app
 from server.db.threads import ThreadRepository, get_thread_repository
 from server.services.execution.event_store import ExecutionEventStore
 
+_MISSING = object()
+
 
 @pytest.fixture()
 def client() -> Iterator[TestClient]:
     tmpdir = tempfile.TemporaryDirectory()
     repository = ThreadRepository(Path(tmpdir.name) / "threads.db")
+    previous_override = app.dependency_overrides.get(get_thread_repository, _MISSING)
     app.dependency_overrides[get_thread_repository] = lambda: repository
     test_client = TestClient(app)
     try:
         yield test_client
     finally:
         test_client.close()
-        app.dependency_overrides.clear()
+        if previous_override is _MISSING:
+            app.dependency_overrides.pop(get_thread_repository, None)
+        else:
+            app.dependency_overrides[get_thread_repository] = previous_override
         tmpdir.cleanup()
 
 

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import base64
+import binascii
 
 from pydantic import BaseModel, Field
+
+MAX_CURSOR_OFFSET = 10000
 
 
 class CursorPage(BaseModel):
@@ -15,8 +18,9 @@ def decode_cursor(cursor: str | None) -> int:
         return 0
     try:
         raw = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("ascii")
-        return max(0, int(raw))
-    except Exception:
+        decoded = int(raw)
+        return max(0, min(decoded, MAX_CURSOR_OFFSET))
+    except (binascii.Error, UnicodeDecodeError, ValueError):
         return 0
 
 
@@ -24,4 +28,3 @@ def encode_cursor(offset: int | None) -> str | None:
     if offset is None:
         return None
     return base64.urlsafe_b64encode(str(max(0, offset)).encode("ascii")).decode("ascii")
-

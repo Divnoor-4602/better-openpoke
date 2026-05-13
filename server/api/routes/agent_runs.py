@@ -26,11 +26,10 @@ def list_agent_runs(
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ) -> AgentRunListResponse:
     offset = decode_cursor(cursor)
-    runs = get_execution_event_store().list_runs(limit=offset + limit)
-    page_items = runs[offset : offset + limit]
-    next_offset = offset + limit if len(runs) > offset + limit else None
+    runs = get_execution_event_store().list_runs(limit=limit, offset=offset)
+    next_offset = offset + limit if len(runs) == limit else None
     return AgentRunListResponse(
-        items=[agent_run_resource(run) for run in page_items],
+        items=[agent_run_resource(run) for run in runs],
         page=CursorPage(nextCursor=encode_cursor(next_offset), limit=limit),
     )
 

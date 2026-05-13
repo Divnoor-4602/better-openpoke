@@ -63,14 +63,7 @@ def _normalize_error_responses(schema: dict[str, object]) -> None:
             if not isinstance(responses, dict):
                 continue
             for status_code in ("400", "404", "422", "500"):
-                response = responses.setdefault(
-                    status_code,
-                    {"description": "Error response"},
-                )
-                if not isinstance(response, dict):
-                    continue
-                content = response.setdefault("content", {})
-                if not isinstance(content, dict):
-                    continue
-                content.setdefault("application/json", {"schema": error_ref})
-
+                responses[status_code] = {
+                    "description": "Error response",
+                    "content": {"application/json": {"schema": error_ref}},
+                }

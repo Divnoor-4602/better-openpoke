@@ -45,6 +45,7 @@ class ThreadRepository:
 
     def list_threads(self, *, offset: int, limit: int) -> tuple[list[ThreadEntity], int | None]:
         safe_limit = max(1, min(limit, 100))
+        normalized_offset = max(0, offset)
         with self._lock, self._connect() as conn:
             rows = conn.execute(
                 """
@@ -53,10 +54,10 @@ class ThreadRepository:
                 ORDER BY updated_at DESC, thread_id DESC
                 LIMIT ? OFFSET ?
                 """,
-                (safe_limit + 1, max(0, offset)),
+                (safe_limit + 1, normalized_offset),
             ).fetchall()
         items = [self._thread_from_row(row) for row in cast(list[sqlite3.Row], rows)]
-        next_offset = offset + safe_limit if len(items) > safe_limit else None
+        next_offset = normalized_offset + safe_limit if len(items) > safe_limit else None
         return items[:safe_limit], next_offset
 
     def get_thread(self, thread_id: str) -> ThreadEntity | None:
@@ -102,20 +103,29 @@ class ThreadRepository:
         content: str,
         parts: list[dict[str, Any]] | None = None,
     ) -> MessageEntity:
-        if self.get_thread(thread_id) is None:
-            raise ThreadNotFoundError(thread_id)
         message_id = str(uuid.uuid4())
         timestamp = self._now()
         parts_json = json.dumps(parts, ensure_ascii=False) if parts is not None else None
         with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO messages (
-                    message_id, thread_id, role, content, parts_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (message_id, thread_id, role, content, parts_json, timestamp),
-            )
+            if (
+                conn.execute(
+                    "SELECT 1 FROM threads WHERE thread_id = ?",
+                    (thread_id,),
+                ).fetchone()
+                is None
+            ):
+                raise ThreadNotFoundError(thread_id)
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO messages (
+                        message_id, thread_id, role, content, parts_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (message_id, thread_id, role, content, parts_json, timestamp),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ThreadNotFoundError(thread_id) from exc
             conn.execute(
                 "UPDATE threads SET updated_at = ? WHERE thread_id = ?",
                 (timestamp, thread_id),
@@ -136,6 +146,7 @@ class ThreadRepository:
         if self.get_thread(thread_id) is None:
             raise ThreadNotFoundError(thread_id)
         safe_limit = max(1, min(limit, 100))
+        normalized_offset = max(0, offset)
         with self._lock, self._connect() as conn:
             rows = conn.execute(
                 """
@@ -145,10 +156,10 @@ class ThreadRepository:
                 ORDER BY created_at ASC, message_id ASC
                 LIMIT ? OFFSET ?
                 """,
-                (thread_id, safe_limit + 1, max(0, offset)),
+                (thread_id, safe_limit + 1, normalized_offset),
             ).fetchall()
         items = [self._message_from_row(row) for row in cast(list[sqlite3.Row], rows)]
-        next_offset = offset + safe_limit if len(items) > safe_limit else None
+        next_offset = normalized_offset + safe_limit if len(items) > safe_limit else None
         return items[:safe_limit], next_offset
 
     def clear_all(self) -> None:
@@ -222,4 +233,3 @@ _thread_repository = ThreadRepository(_THREAD_DB_PATH)
 
 def get_thread_repository() -> ThreadRepository:
     return _thread_repository
-
