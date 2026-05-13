@@ -43,5 +43,6 @@ server/venv/
 /package-lock.json
 
 # Generated documentation / analysis artifacts
+server/generated/openapi.json
 server/repomix-output.txt
 server/plans/

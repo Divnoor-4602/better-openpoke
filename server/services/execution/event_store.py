@@ -50,6 +50,7 @@ class ExecutionEvent(TypedDict):
 class ExecutionRun(TypedDict):
     requestId: str
     memoryId: str
+    threadId: str | None
     parentMemoryId: str | None
     title: str
     status: ExecutionRunStatus
@@ -62,6 +63,7 @@ class ExecutionRun(TypedDict):
 class ExecutionEventPayload(TypedDict):
     requestId: str
     memoryId: str
+    threadId: str | None
     parentMemoryId: str | None
     title: str
     event: ExecutionEvent
@@ -99,6 +101,7 @@ class ExecutionEventStore:
         title: str,
         instructions: str,
         parent_memory_id: str | None = None,
+        thread_id: str | None = None,
     ) -> None:
         self._upsert_run(
             request_id=request_id,
@@ -106,12 +109,14 @@ class ExecutionEventStore:
             title=title,
             status="queued",
             parent_memory_id=parent_memory_id,
+            thread_id=thread_id,
             ok=None,
         )
         self.record_event(
             request_id=request_id,
             memory_id=memory_id,
             parent_memory_id=parent_memory_id,
+            thread_id=thread_id,
             event_type="status",
             state="queued",
             text=instructions,
@@ -217,6 +222,7 @@ class ExecutionEventStore:
         event_type: ExecutionEventType,
         state: ExecutionEventState | None = None,
         parent_memory_id: str | None = None,
+        thread_id: str | None = None,
         tool_call_id: str | None = None,
         tool_name: str | None = None,
         text: str | None = None,
@@ -240,6 +246,7 @@ class ExecutionEventStore:
         payload: ExecutionEventPayload = {
             "requestId": request_id,
             "memoryId": memory_id,
+            "threadId": thread_id,
             "parentMemoryId": parent_memory_id,
             "title": memory_id,
             "event": event,
@@ -248,14 +255,15 @@ class ExecutionEventStore:
             cursor = conn.execute(
                 """
                 INSERT INTO execution_events (
-                    request_id, memory_id, parent_memory_id, type, state,
+                    request_id, memory_id, thread_id, parent_memory_id, type, state,
                     tool_call_id, tool_name, text, input_json, output_json,
                     error, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request_id,
                     memory_id,
+                    thread_id,
                     parent_memory_id,
                     event_type,
                     state,
@@ -276,14 +284,18 @@ class ExecutionEventStore:
             run = cast(
                 sqlite3.Row | None,
                 conn.execute(
-                    "SELECT title, parent_memory_id FROM execution_runs WHERE request_id = ?",
+                    "SELECT title, thread_id, parent_memory_id FROM execution_runs WHERE request_id = ?",
                     (request_id,),
                 ).fetchone(),
             )
             if run is not None:
                 title_value = self._row_value(run, "title")
+                thread_id_value = self._row_value(run, "thread_id")
                 parent_memory_id_value = self._row_value(run, "parent_memory_id")
                 payload["title"] = str(title_value)
+                payload["threadId"] = payload["threadId"] or self._optional_str(
+                    thread_id_value
+                )
                 payload["parentMemoryId"] = payload[
                     "parentMemoryId"
                 ] or self._optional_str(parent_memory_id_value)
@@ -319,6 +331,7 @@ class ExecutionEventStore:
         return {
             "requestId": str(self._row_value(row, "request_id")),
             "memoryId": str(self._row_value(row, "memory_id")),
+            "threadId": self._optional_str(self._row_value(row, "thread_id")),
             "parentMemoryId": self._optional_str(
                 self._row_value(row, "parent_memory_id")
             ),
@@ -345,17 +358,31 @@ class ExecutionEventStore:
             ).fetchall()
         return [self._event_row_to_part(row) for row in cast(list[sqlite3.Row], rows)]
 
-    def list_runs(self, *, limit: int = 30) -> list[ExecutionRun]:
+    def list_runs(
+        self, *, limit: int = 30, thread_id: str | None = None
+    ) -> list[ExecutionRun]:
         with self._lock, self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT *
-                FROM execution_runs
-                ORDER BY updated_at DESC
-                LIMIT ?
-                """,
-                (max(1, min(limit, 100)),),
-            ).fetchall()
+            if thread_id is None:
+                rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM execution_runs
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (max(1, min(limit, 500)),),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM execution_runs
+                    WHERE thread_id = ?
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (thread_id, max(1, min(limit, 500))),
+                ).fetchall()
             rows = cast(list[sqlite3.Row], rows)
             request_ids = [str(self._row_value(row, "request_id")) for row in rows]
             events_by_run = self._events_by_request(conn, request_ids)
@@ -364,6 +391,7 @@ class ExecutionEventStore:
             {
                 "requestId": str(self._row_value(row, "request_id")),
                 "memoryId": str(self._row_value(row, "memory_id")),
+                "threadId": self._optional_str(self._row_value(row, "thread_id")),
                 "parentMemoryId": self._optional_str(
                     self._row_value(row, "parent_memory_id")
                 ),
@@ -392,17 +420,19 @@ class ExecutionEventStore:
         status: ExecutionRunStatus,
         ok: bool | None,
         parent_memory_id: str | None = None,
+        thread_id: str | None = None,
     ) -> None:
         timestamp = self._now()
         with self._lock, self._connect() as conn:
             _ = conn.execute(
                 """
                 INSERT INTO execution_runs (
-                    request_id, memory_id, parent_memory_id, title, status,
+                    request_id, memory_id, thread_id, parent_memory_id, title, status,
                     ok, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(request_id) DO UPDATE SET
                     memory_id = excluded.memory_id,
+                    thread_id = COALESCE(excluded.thread_id, execution_runs.thread_id),
                     parent_memory_id = COALESCE(excluded.parent_memory_id, execution_runs.parent_memory_id),
                     title = excluded.title,
                     status = excluded.status,
@@ -412,6 +442,7 @@ class ExecutionEventStore:
                 (
                     request_id,
                     memory_id,
+                    thread_id,
                     parent_memory_id,
                     title,
                     status,
@@ -478,6 +509,7 @@ class ExecutionEventStore:
                 CREATE TABLE IF NOT EXISTS execution_runs (
                     request_id TEXT PRIMARY KEY,
                     memory_id TEXT NOT NULL,
+                    thread_id TEXT,
                     parent_memory_id TEXT,
                     title TEXT NOT NULL,
                     status TEXT NOT NULL,
@@ -490,6 +522,7 @@ class ExecutionEventStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     request_id TEXT NOT NULL,
                     memory_id TEXT NOT NULL,
+                    thread_id TEXT,
                     parent_memory_id TEXT,
                     type TEXT NOT NULL,
                     state TEXT,
@@ -507,9 +540,26 @@ class ExecutionEventStore:
 
                 CREATE INDEX IF NOT EXISTS idx_execution_runs_updated
                 ON execution_runs (updated_at);
+
+                """
+            )
+            self._ensure_column(conn, "execution_runs", "thread_id", "TEXT")
+            self._ensure_column(conn, "execution_events", "thread_id", "TEXT")
+            _ = conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_execution_runs_thread_updated
+                ON execution_runs (thread_id, updated_at)
                 """
             )
             conn.commit()
+
+    def _ensure_column(
+        self, conn: sqlite3.Connection, table: str, column: str, definition: str
+    ) -> None:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        names = {str(row["name"]) for row in cast(list[sqlite3.Row], rows)}
+        if column not in names:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
