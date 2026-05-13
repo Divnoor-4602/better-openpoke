@@ -12,7 +12,8 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "dev:web": "turbo dev --filter=openpoke-web --ui=tui",
-    "dev:server": "turbo dev --filter=openpoke-server --ui=tui"
+    "dev:server": "turbo dev --filter=openpoke-server --ui=tui",
+    "dev:app": "turbo dev --filter=openpoke-server --filter=openpoke-web --filter=web --ui=tui"
   },
   "devDependencies": {
     "turbo": "^2.9.12"

@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import os
 import threading
-from datetime import datetime
-from typing import Any, Dict, Optional
+from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
+from typing import TypeAlias, cast
 
 from fastapi import status
 from fastapi.responses import JSONResponse
@@ -12,64 +13,66 @@ from fastapi.responses import JSONResponse
 from ...config import Settings, get_settings
 from ...logging_config import logger
 from ...models import GmailConnectPayload, GmailDisconnectPayload, GmailStatusPayload
-from ...utils import error_response
+from ...utils import error_response  # pyright: ignore[reportAny]
+
+JsonDict: TypeAlias = dict[str, object]
 
 _CLIENT_LOCK = threading.Lock()
-_CLIENT: Optional[Any] = None
+_client: object | None = None
 
-_PROFILE_CACHE: Dict[str, Dict[str, Any]] = {}
+_PROFILE_CACHE: dict[str, JsonDict] = {}
 _PROFILE_CACHE_LOCK = threading.Lock()
 _ACTIVE_USER_ID_LOCK = threading.Lock()
-_ACTIVE_USER_ID: Optional[str] = None
+_active_user_id: str | None = None
 
 
-def _normalized(value: Optional[str]) -> str:
-    return (value or "").strip()
+def _normalized(value: object) -> str:
+    return str(value or "").strip()
 
 
-def _set_active_gmail_user_id(user_id: Optional[str]) -> None:
+def _set_active_gmail_user_id(user_id: object) -> None:
     sanitized = _normalized(user_id)
     with _ACTIVE_USER_ID_LOCK:
-        global _ACTIVE_USER_ID
-        _ACTIVE_USER_ID = sanitized or None
+        global _active_user_id
+        _active_user_id = sanitized or None
 
 
-def get_active_gmail_user_id() -> Optional[str]:
+def get_active_gmail_user_id() -> str | None:
     with _ACTIVE_USER_ID_LOCK:
-        return _ACTIVE_USER_ID
+        return _active_user_id
 
 
-def _gmail_import_client():
-    from composio import Composio  # type: ignore
+def _gmail_import_client() -> Callable[..., object]:
+    from composio import Composio  # type: ignore[import-untyped]
 
-    return Composio
+    return cast(Callable[..., object], Composio)
 
 
-# Get or create a singleton Composio client instance with thread-safe initialization
-def _get_composio_client(settings: Optional[Settings] = None):
-    global _CLIENT
-    if _CLIENT is not None:
-        return _CLIENT
+def _get_composio_client(settings: Settings | None = None) -> object:
+    global _client
+    if _client is not None:
+        return _client
 
     with _CLIENT_LOCK:
-        if _CLIENT is None:
+        if _client is None:
             resolved_settings = settings or get_settings()
-            Composio = _gmail_import_client()
+            composio = _gmail_import_client()
             api_key = resolved_settings.composio_api_key
             try:
-                _CLIENT = Composio(api_key=api_key) if api_key else Composio()
+                _client = composio(api_key=api_key) if api_key else composio()
             except TypeError as exc:
                 if api_key:
                     raise RuntimeError(
                         "Installed Composio SDK does not accept the api_key argument; upgrade the SDK or remove COMPOSIO_API_KEY."
                     ) from exc
-                _CLIENT = Composio()
-    return _CLIENT
+                _client = composio()
+    return _client
 
 
-def _extract_email(obj: Any) -> Optional[str]:
+def _extract_email(obj: object) -> str | None:
     if obj is None:
         return None
+
     direct_keys = (
         "email",
         "email_address",
@@ -78,32 +81,32 @@ def _extract_email(obj: Any) -> Optional[str]:
         "provider_email",
         "account_email",
     )
+    obj_map = _as_mapping(obj)
     for key in direct_keys:
-        try:
-            val = getattr(obj, key)
-            if isinstance(val, str) and "@" in val:
-                return val
-        except Exception:
-            pass
-        if isinstance(obj, dict):
-            val = obj.get(key)
-            if isinstance(val, str) and "@" in val:
-                return val
-    if isinstance(obj, dict):
-        email_addresses = obj.get("emailAddresses")
+        value = _attr(obj, key)
+        if isinstance(value, str) and "@" in value:
+            return value
+        if obj_map is not None:
+            value = obj_map.get(key)
+            if isinstance(value, str) and "@" in value:
+                return value
+
+    if obj_map is not None:
+        email_addresses = obj_map.get("emailAddresses")
         if isinstance(email_addresses, (list, tuple)):
-            for entry in email_addresses:
-                if isinstance(entry, dict):
+            for entry in cast(list[object] | tuple[object, ...], email_addresses):
+                entry_map = _as_mapping(entry)
+                if entry_map is not None:
                     candidate = (
-                        entry.get("value")
-                        or entry.get("email")
-                        or entry.get("emailAddress")
+                        entry_map.get("value")
+                        or entry_map.get("email")
+                        or entry_map.get("emailAddress")
                     )
                     if isinstance(candidate, str) and "@" in candidate:
                         return candidate
                 elif isinstance(entry, str) and "@" in entry:
                     return entry
-    if isinstance(obj, dict):
+
         nested_paths = (
             ("profile", "email"),
             ("profile", "emailAddress"),
@@ -113,49 +116,49 @@ def _extract_email(obj: Any) -> Optional[str]:
             ("provider_profile", "email"),
         )
         for path in nested_paths:
-            current: Any = obj
+            current: object | None = obj_map
             for segment in path:
-                if isinstance(current, dict) and segment in current:
-                    current = current[segment]
-                else:
+                current_map = _as_mapping(current)
+                if current_map is None or segment not in current_map:
                     current = None
                     break
+                current = current_map[segment]
             if isinstance(current, str) and "@" in current:
                 return current
+
     return None
 
 
-def _cache_profile(user_id: str, profile: Dict[str, Any]) -> None:
+def _cache_profile(user_id: str, profile: JsonDict) -> None:
     sanitized = _normalized(user_id)
-    if not sanitized or not isinstance(profile, dict):
+    if not sanitized:
         return
     with _PROFILE_CACHE_LOCK:
         _PROFILE_CACHE[sanitized] = {
             "profile": profile,
-            "cached_at": datetime.utcnow().isoformat(),
+            "cached_at": datetime.now(timezone.utc).isoformat(),
         }
 
 
-def _get_cached_profile(user_id: Optional[str]) -> Optional[Dict[str, Any]]:
+def _get_cached_profile(user_id: object) -> JsonDict | None:
     sanitized = _normalized(user_id)
     if not sanitized:
         return None
     with _PROFILE_CACHE_LOCK:
         payload = _PROFILE_CACHE.get(sanitized)
-        if payload and isinstance(payload.get("profile"), dict):
-            return payload["profile"]
-    return None
+        profile = _as_dict(payload.get("profile")) if payload else None
+        return profile
 
 
-def _clear_cached_profile(user_id: Optional[str] = None) -> None:
+def _clear_cached_profile(user_id: object = None) -> None:
     with _PROFILE_CACHE_LOCK:
         if user_id:
-            _PROFILE_CACHE.pop(_normalized(user_id), None)
+            _ = _PROFILE_CACHE.pop(_normalized(user_id), None)
         else:
             _PROFILE_CACHE.clear()
 
 
-def _fetch_profile_from_composio(user_id: Optional[str]) -> Optional[Dict[str, Any]]:
+def _fetch_profile_from_composio(user_id: object) -> JsonDict | None:
     sanitized = _normalized(user_id)
     if not sanitized:
         return None
@@ -166,49 +169,45 @@ def _fetch_profile_from_composio(user_id: Optional[str]) -> Optional[Dict[str, A
     except RuntimeError as exc:
         logger.warning("GMAIL_GET_PROFILE invocation failed: %s", exc)
         return None
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception:  # pragma: no cover - defensive
         logger.exception(
             "Unexpected error fetching Gmail profile", extra={"user_id": sanitized}
         )
         return None
 
-    profile: Optional[Dict[str, Any]] = None
-    if isinstance(result, dict):
-        if isinstance(result.get("data"), dict):
-            profile = result["data"]
-        elif isinstance(result.get("profile"), dict):
-            profile = result["profile"]
-        elif isinstance(result.get("response_data"), dict):
-            profile = result["response_data"]
-        elif isinstance(result.get("items"), list):
-            for item in result["items"]:
-                if not isinstance(item, dict):
-                    continue
-                data_dict = item.get("data")
-                if isinstance(data_dict, dict):
-                    if isinstance(data_dict.get("response_data"), dict):
-                        profile = data_dict["response_data"]
-                    elif isinstance(data_dict.get("profile"), dict):
-                        profile = data_dict["profile"]
-                    else:
-                        profile = data_dict
-                elif isinstance(item.get("response_data"), dict):
-                    profile = item["response_data"]
-                elif isinstance(item.get("profile"), dict):
-                    profile = item["profile"]
-                if isinstance(profile, dict):
-                    break
-        elif result.get("successful") is True and isinstance(
-            result.get("result"), dict
-        ):
-            profile = result.get("result")  # type: ignore[assignment]
-        elif all(
-            not isinstance(result.get(key), dict)
-            for key in ("data", "profile", "result")
-        ):
-            profile = result if result else None
+    profile: JsonDict | None = None
+    if data := _as_dict(result.get("data")):
+        profile = data
+    elif data := _as_dict(result.get("profile")):
+        profile = data
+    elif data := _as_dict(result.get("response_data")):
+        profile = data
+    elif isinstance(result.get("items"), list):
+        for item in cast(list[object], result["items"]):
+            item_map = _as_mapping(item)
+            if item_map is None:
+                continue
+            data_dict = _as_dict(item_map.get("data"))
+            if data_dict is not None:
+                profile = (
+                    _as_dict(data_dict.get("response_data"))
+                    or _as_dict(data_dict.get("profile"))
+                    or data_dict
+                )
+            else:
+                profile = _as_dict(item_map.get("response_data")) or _as_dict(
+                    item_map.get("profile")
+                )
+            if profile is not None:
+                break
+    elif result.get("successful") is True:
+        profile = _as_dict(result.get("result"))
+    elif all(
+        not isinstance(result.get(key), dict) for key in ("data", "profile", "result")
+    ):
+        profile = result if result else None
 
-    if isinstance(profile, dict):
+    if profile is not None:
         _cache_profile(sanitized, profile)
         return profile
 
@@ -219,13 +218,12 @@ def _fetch_profile_from_composio(user_id: Optional[str]) -> Optional[Dict[str, A
     return None
 
 
-# Start Gmail OAuth connection process and return redirect URL
 def initiate_connect(payload: GmailConnectPayload, settings: Settings) -> JSONResponse:
     auth_config_id = (
         payload.auth_config_id or settings.composio_gmail_auth_config_id or ""
     )
     if not auth_config_id:
-        return error_response(
+        return _error_response(
             "Missing auth_config_id. Set COMPOSIO_GMAIL_AUTH_CONFIG_ID or pass auth_config_id.",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -235,77 +233,89 @@ def initiate_connect(payload: GmailConnectPayload, settings: Settings) -> JSONRe
     _clear_cached_profile(user_id)
     try:
         client = _get_composio_client(settings)
-        link = getattr(client.connected_accounts, "link", None)
+        connected_accounts = _attr(client, "connected_accounts")
+        link = _attr(connected_accounts, "link")
         if not callable(link):
             raise RuntimeError(
                 "Installed Composio SDK does not expose connected_accounts.link; upgrade the SDK to connect Gmail."
             )
         req = link(user_id=user_id, auth_config_id=auth_config_id)
-        data = {
-            "ok": True,
-            "redirect_url": getattr(req, "redirect_url", None)
-            or getattr(req, "redirectUrl", None),
-            "connection_request_id": getattr(req, "id", None),
-            "user_id": user_id,
-        }
-        return JSONResponse(data)
+        return JSONResponse(
+            {
+                "ok": True,
+                "redirect_url": _attr(req, "redirect_url") or _attr(req, "redirectUrl"),
+                "connection_request_id": _attr(req, "id"),
+                "user_id": user_id,
+            }
+        )
     except Exception as exc:
         logger.exception("gmail connect failed", extra={"user_id": user_id})
-        return error_response(
+        return _error_response(
             "Failed to initiate Gmail connect",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
         )
 
 
-# Check Gmail connection status and retrieve user account information
 def fetch_status(payload: GmailStatusPayload) -> JSONResponse:
     connection_request_id = _normalized(payload.connection_request_id)
     user_id = _normalized(payload.user_id)
 
     if not connection_request_id and not user_id:
-        return error_response(
+        return _error_response(
             "Missing connection_request_id or user_id",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
     try:
         client = _get_composio_client()
-        account: Any = None
+        connected_accounts = _attr(client, "connected_accounts")
+        account: object | None = None
         if connection_request_id:
             try:
-                account = client.connected_accounts.wait_for_connection(
-                    connection_request_id, timeout=2.0
+                wait_for_connection = cast(
+                    Callable[..., object],
+                    _attr(connected_accounts, "wait_for_connection"),
                 )
+                account = wait_for_connection(connection_request_id, timeout=2.0)
             except Exception:
                 try:
-                    account = client.connected_accounts.get(connection_request_id)
+                    get_connection = cast(
+                        Callable[..., object], _attr(connected_accounts, "get")
+                    )
+                    account = get_connection(connection_request_id)
                 except Exception:
                     account = None
         if account is None and user_id:
             try:
-                items = client.connected_accounts.list(
+                list_connections = cast(
+                    Callable[..., object], _attr(connected_accounts, "list")
+                )
+                items = list_connections(
                     user_ids=[user_id], toolkit_slugs=["GMAIL"], statuses=["ACTIVE"]
                 )
-                data = getattr(items, "data", None)
-                if data is None and isinstance(items, dict):
-                    data = items.get("data")
-                if data:
-                    account = data[0]
+                data = _attr(items, "data")
+                items_map = _as_mapping(items)
+                if data is None and items_map is not None:
+                    data = items_map.get("data")
+                if isinstance(data, list) and data:
+                    account = cast(list[object], data)[0]
             except Exception:
                 account = None
-        status_value = None
-        email = None
-        connected = False
-        profile: Optional[Dict[str, Any]] = None
-        profile_source = "none"
 
-        account_user_id = None
+        status_value: object = None
+        email: str | None = None
+        connected = False
+        profile: JsonDict | None = None
+        profile_source = "none"
+        account_user_id: object = None
+
         if account is not None:
-            status_value = getattr(account, "status", None) or (
-                account.get("status") if isinstance(account, dict) else None
+            account_map = _as_mapping(account)
+            status_value = _attr(account, "status") or (
+                account_map.get("status") if account_map is not None else None
             )
-            normalized_status = (status_value or "").upper()
+            normalized_status = str(status_value or "").upper()
             connected = normalized_status in {
                 "CONNECTED",
                 "SUCCESS",
@@ -314,10 +324,9 @@ def fetch_status(payload: GmailStatusPayload) -> JSONResponse:
                 "COMPLETED",
             }
             email = _extract_email(account)
-            if hasattr(account, "user_id"):
-                account_user_id = getattr(account, "user_id", None)
-            elif isinstance(account, dict):
-                account_user_id = account.get("user_id")
+            account_user_id = _attr(account, "user_id") or (
+                account_map.get("user_id") if account_map is not None else None
+            )
 
         if not user_id and account_user_id:
             user_id = _normalized(account_user_id)
@@ -358,7 +367,7 @@ def fetch_status(payload: GmailStatusPayload) -> JSONResponse:
                 "user_id": user_id,
             },
         )
-        return error_response(
+        return _error_response(
             "Failed to fetch connection status",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
@@ -372,18 +381,19 @@ def disconnect_account(payload: GmailDisconnectPayload) -> JSONResponse:
     user_id = _normalized(payload.user_id)
 
     if not connection_id and not user_id:
-        return error_response(
+        return _error_response(
             "Missing connection_id or user_id",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
     try:
         client = _get_composio_client()
+        connected_accounts = _attr(client, "connected_accounts")
     except Exception as exc:
         logger.exception(
             "gmail disconnect failed: client init", extra={"user_id": user_id}
         )
-        return error_response(
+        return _error_response(
             "Failed to disconnect Gmail",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
@@ -398,19 +408,30 @@ def disconnect_account(payload: GmailDisconnectPayload) -> JSONResponse:
         if not sanitized_id:
             return
         try:
-            connection = client.connected_accounts.get(sanitized_id)
+            get_connection = cast(
+                Callable[..., object], _attr(connected_accounts, "get")
+            )
+            connection = get_connection(sanitized_id)
         except Exception:
             connection = None
         try:
-            client.connected_accounts.delete(sanitized_id)
+            delete_connection = cast(
+                Callable[..., object], _attr(connected_accounts, "delete")
+            )
+            _ = delete_connection(sanitized_id)
             removed_ids.append(sanitized_id)
             if connection is not None:
-                if hasattr(connection, "user_id"):
-                    affected_user_ids.add(
-                        _normalized(getattr(connection, "user_id", None))
+                connection_map = _as_mapping(connection)
+                affected_user_ids.add(
+                    _normalized(
+                        _attr(connection, "user_id")
+                        or (
+                            connection_map.get("user_id")
+                            if connection_map is not None
+                            else None
+                        )
                     )
-                elif isinstance(connection, dict):
-                    affected_user_ids.add(_normalized(connection.get("user_id")))
+                )
         except Exception as exc:  # pragma: no cover - depends on remote state
             logger.exception(
                 "Failed to remove Gmail connection",
@@ -422,36 +443,37 @@ def disconnect_account(payload: GmailDisconnectPayload) -> JSONResponse:
         _delete_connection(connection_id)
     else:
         try:
-            items = client.connected_accounts.list(
-                user_ids=[user_id], toolkit_slugs=["GMAIL"]
+            list_connections = cast(
+                Callable[..., object], _attr(connected_accounts, "list")
             )
-            data = getattr(items, "data", None)
-            if data is None and isinstance(items, dict):
-                data = items.get("data")
+            items = list_connections(user_ids=[user_id], toolkit_slugs=["GMAIL"])
+            data = _attr(items, "data")
+            items_map = _as_mapping(items)
+            if data is None and items_map is not None:
+                data = items_map.get("data")
         except Exception as exc:  # pragma: no cover - dependent on SDK
             logger.exception(
                 "Failed to list Gmail connections", extra={"user_id": user_id}
             )
-            return error_response(
+            return _error_response(
                 "Failed to disconnect Gmail",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=str(exc),
             )
 
-        if data:
-            for entry in data:
-                candidate = None
-                candidate_user_id = None
-                if hasattr(entry, "id"):
-                    candidate = getattr(entry, "id", None)
-                    candidate_user_id = getattr(entry, "user_id", None)
-                if candidate is None and isinstance(entry, dict):
-                    candidate = entry.get("id")
-                    candidate_user_id = entry.get("user_id")
+        if isinstance(data, list) and data:
+            for entry in cast(list[object], data):
+                entry_map = _as_mapping(entry)
+                candidate = _attr(entry, "id") or (
+                    entry_map.get("id") if entry_map is not None else None
+                )
+                candidate_user_id = _attr(entry, "user_id") or (
+                    entry_map.get("user_id") if entry_map is not None else None
+                )
                 if candidate:
                     if candidate_user_id:
                         affected_user_ids.add(_normalized(candidate_user_id))
-                    _delete_connection(candidate)
+                    _delete_connection(str(candidate))
 
     if user_id:
         affected_user_ids.add(user_id)
@@ -463,71 +485,79 @@ def disconnect_account(payload: GmailDisconnectPayload) -> JSONResponse:
                 _set_active_gmail_user_id(None)
 
     if errors and not removed_ids:
-        return error_response(
+        return _error_response(
             "Failed to disconnect Gmail",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="; ".join(errors),
         )
 
-    payload = {
+    response_payload: JsonDict = {
         "ok": True,
         "disconnected": bool(removed_ids),
         "removed_connection_ids": removed_ids,
     }
     if not removed_ids:
-        payload["message"] = "No Gmail connection found"
+        response_payload["message"] = "No Gmail connection found"
 
     if errors:
-        payload["warnings"] = errors
-    return JSONResponse(payload)
+        response_payload["warnings"] = errors
+    return JSONResponse(response_payload)
 
 
-def _normalize_tool_response(result: Any) -> Dict[str, Any]:
-    payload_dict: Optional[Dict[str, Any]] = None
+def _normalize_tool_response(result: object) -> JsonDict:
+    payload_dict: JsonDict | None = None
     try:
-        if hasattr(result, "model_dump"):
-            payload_dict = result.model_dump()  # type: ignore[assignment]
-        elif hasattr(result, "dict"):
-            payload_dict = result.dict()  # type: ignore[assignment]
+        model_dump = _attr(result, "model_dump")
+        legacy_dict = _attr(result, "dict")
+        if callable(model_dump):
+            payload_dict = _as_dict(cast(Callable[[], object], model_dump)())
+        elif callable(legacy_dict):
+            payload_dict = _as_dict(cast(Callable[[], object], legacy_dict)())
     except Exception:
         payload_dict = None
 
     if payload_dict is None:
         try:
-            if hasattr(result, "model_dump_json"):
-                payload_dict = json.loads(result.model_dump_json())
+            model_dump_json = _attr(result, "model_dump_json")
+            if callable(model_dump_json):
+                loaded = cast(
+                    object, json.loads(cast(Callable[[], str], model_dump_json)())
+                )
+                payload_dict = _as_dict(loaded)
         except Exception:
             payload_dict = None
 
     if payload_dict is None:
-        if isinstance(result, dict):
-            payload_dict = result
+        if result_dict := _as_dict(result):
+            payload_dict = result_dict
         elif isinstance(result, list):
-            payload_dict = {"items": result}
+            payload_dict = {"items": cast(list[object], result)}
         else:
             payload_dict = {"repr": str(result)}
 
     return payload_dict
 
 
-# Execute Gmail operations through Composio SDK with error handling
 def execute_gmail_tool(
     tool_name: str,
     composio_user_id: str,
     *,
-    arguments: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    prepared_arguments: Dict[str, Any] = {}
-    if isinstance(arguments, dict):
+    arguments: Mapping[str, object] | None = None,
+) -> JsonDict:
+    prepared_arguments: JsonDict = {}
+    if isinstance(arguments, Mapping):
         for key, value in arguments.items():
             if value is not None:
-                prepared_arguments[key] = value
+                prepared_arguments[str(key)] = value
 
-    prepared_arguments.setdefault("user_id", "me")
+    _ = prepared_arguments.setdefault("user_id", "me")
 
     try:
         client = _get_composio_client()
-        result = client.client.tools.execute(
+        sdk_client = _attr(client, "client")
+        tools = _attr(sdk_client, "tools")
+        execute = cast(Callable[..., object], _attr(tools, "execute"))
+        result = execute(
             tool_name,
             user_id=composio_user_id,
             arguments=prepared_arguments,
@@ -539,3 +569,29 @@ def execute_gmail_tool(
             extra={"tool": tool_name, "user_id": composio_user_id},
         )
         raise RuntimeError(f"{tool_name} invocation failed: {exc}") from exc
+
+
+def _attr(obj: object, name: str) -> object | None:
+    return getattr(obj, name, None)
+
+
+def _as_mapping(value: object) -> Mapping[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return {
+        str(key): item for key, item in cast(Mapping[object, object], value).items()
+    }
+
+
+def _as_dict(value: object) -> JsonDict | None:
+    mapping = _as_mapping(value)
+    return dict(mapping) if mapping is not None else None
+
+
+def _error_response(
+    message: str, *, status_code: int, detail: str | None = None
+) -> JSONResponse:
+    return cast(
+        JSONResponse,
+        error_response(message, status_code=status_code, detail=detail),
+    )

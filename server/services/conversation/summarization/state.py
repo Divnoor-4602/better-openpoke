@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
 
 
 @dataclass(frozen=True)
@@ -12,7 +11,7 @@ class LogEntry:
     tag: str
     payload: str
     index: int = -1
-    timestamp: Optional[str] = None
+    timestamp: str | None = None
 
 
 @dataclass
@@ -21,8 +20,8 @@ class SummaryState:
 
     summary_text: str = ""
     last_index: int = -1
-    updated_at: Optional[datetime] = None
-    unsummarized_entries: List[LogEntry] = field(default_factory=list)
+    updated_at: datetime | None = None
+    unsummarized_entries: list[LogEntry] = field(default_factory=list)
 
     @classmethod
     def empty(cls) -> "SummaryState":

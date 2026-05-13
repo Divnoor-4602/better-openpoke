@@ -1,3 +1,31 @@
-from .client import OpenRouterError, request_chat_completion
+from .client import (
+    JsonObject,
+    JsonScalar,
+    JsonValue,
+    OpenRouterBaseURL,
+    OpenRouterAssistantMessage,
+    OpenRouterChatCompletion,
+    OpenRouterChatCompletionChunk,
+    OpenRouterError,
+    OpenRouterMessage,
+    OpenRouterTool,
+    OpenRouterToolCall,
+    request_chat_completion,
+    stream_chat_completion,
+)
 
-__all__ = ["OpenRouterError", "request_chat_completion"]
+__all__ = [
+    "OpenRouterAssistantMessage",
+    "OpenRouterBaseURL",
+    "OpenRouterChatCompletion",
+    "OpenRouterChatCompletionChunk",
+    "OpenRouterError",
+    "OpenRouterMessage",
+    "OpenRouterTool",
+    "OpenRouterToolCall",
+    "JsonObject",
+    "JsonScalar",
+    "JsonValue",
+    "request_chat_completion",
+    "stream_chat_completion",
+]

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from textwrap import dedent
-from typing import Dict, List
 
 from .state import LogEntry
 
@@ -10,7 +9,7 @@ from .state import LogEntry
 @dataclass(frozen=True)
 class SummaryPrompt:
     system_prompt: str
-    messages: List[Dict[str, str]]
+    messages: list[dict[str, str]]
 
 
 _SYSTEM_PROMPT = dedent(
@@ -63,8 +62,8 @@ def _format_existing_summary(previous_summary: str) -> str:
     return summary if summary else "None"
 
 
-def _format_log_entries(entries: List[LogEntry]) -> str:
-    lines: List[str] = []
+def _format_log_entries(entries: list[LogEntry]) -> str:
+    lines: list[str] = []
     for entry in entries:
         label = entry.tag.replace("_", " ")
         payload = entry.payload.strip()
@@ -76,7 +75,7 @@ def _format_log_entries(entries: List[LogEntry]) -> str:
     return "\n".join(lines) if lines else "(no new logs)"
 
 
-def build_summarization_prompt(previous_summary: str, entries: List[LogEntry]) -> SummaryPrompt:
+def build_summarization_prompt(previous_summary: str, entries: list[LogEntry]) -> SummaryPrompt:
     content = dedent(
         f"""
         Existing memory summary:

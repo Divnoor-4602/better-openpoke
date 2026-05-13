@@ -3,26 +3,28 @@
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ENV_PATH = PROJECT_ROOT / ".env"
 
 
 def _load_env_file() -> None:
     """Load .env from root directory if present."""
-    env_path = Path(__file__).parent.parent / ".env"
-    if not env_path.is_file():
+    if not ENV_PATH.is_file():
         return
-    try:
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#") and "=" in stripped:
-                key, value = stripped.split("=", 1)
-                key, value = key.strip(), value.strip().strip("'\"")
-                if key and value and key not in os.environ:
-                    os.environ[key] = value
-    except Exception:
-        pass
+
+    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+
+        key, raw_value = stripped.split("=", 1)
+        key = key.strip()
+        value = raw_value.strip().strip("'\"")
+        if key and value and key not in os.environ:
+            os.environ[key] = value
 
 
 _load_env_file()
@@ -35,6 +37,13 @@ DEFAULT_APP_VERSION = "0.3.0"
 def _env_int(name: str, fallback: int) -> int:
     try:
         return int(os.getenv(name, str(fallback)))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _env_float(name: str, fallback: float) -> float:
+    try:
+        return float(os.getenv(name, str(fallback)))
     except (TypeError, ValueError):
         return fallback
 
@@ -58,28 +67,58 @@ class Settings(BaseModel):
     email_classifier_model: str = Field(default="anthropic/claude-sonnet-4")
 
     # Credentials / integrations
-    openrouter_api_key: Optional[str] = Field(default=os.getenv("OPENROUTER_API_KEY"))
-    composio_gmail_auth_config_id: Optional[str] = Field(default=os.getenv("COMPOSIO_GMAIL_AUTH_CONFIG_ID"))
-    composio_api_key: Optional[str] = Field(default=os.getenv("COMPOSIO_API_KEY"))
+    openrouter_api_key: str | None = Field(default=os.getenv("OPENROUTER_API_KEY"))
+    composio_gmail_auth_config_id: str | None = Field(
+        default=os.getenv("COMPOSIO_GMAIL_AUTH_CONFIG_ID")
+    )
+    composio_api_key: str | None = Field(default=os.getenv("COMPOSIO_API_KEY"))
+
+    # Derived memory search infrastructure. SQLite remains the source of truth.
+    pinecone_api_key: str | None = Field(default=os.getenv("PINECONE_API_KEY"))
+    pinecone_index_host: str | None = Field(default=os.getenv("PINECONE_INDEX_HOST"))
+    pinecone_namespace: str = Field(default=os.getenv("PINECONE_NAMESPACE", "openpoke"))
+    memory_search_backend: str = Field(
+        default=os.getenv("MEMORY_SEARCH_BACKEND", "pinecone_hybrid")
+    )
+    memory_index_workers: int = Field(default=_env_int("MEMORY_INDEX_WORKERS", 2))
+    memory_index_batch_size: int = Field(
+        default=_env_int("MEMORY_INDEX_BATCH_SIZE", 50)
+    )
+    memory_index_max_attempts: int = Field(
+        default=_env_int("MEMORY_INDEX_MAX_ATTEMPTS", 5)
+    )
+    memory_index_poll_interval_seconds: float = Field(
+        default=_env_float("MEMORY_INDEX_POLL_INTERVAL_SECONDS", 2.0)
+    )
+    memory_debug_log_content: bool = Field(
+        default=os.getenv("MEMORY_DEBUG_LOG_CONTENT", "0") == "1"
+    )
 
     # HTTP behaviour
-    cors_allow_origins_raw: str = Field(default=os.getenv("OPENPOKE_CORS_ALLOW_ORIGINS", "*"))
+    cors_allow_origins_raw: str = Field(
+        default=os.getenv("OPENPOKE_CORS_ALLOW_ORIGINS", "*")
+    )
     enable_docs: bool = Field(default=os.getenv("OPENPOKE_ENABLE_DOCS", "1") != "0")
-    docs_url: Optional[str] = Field(default=os.getenv("OPENPOKE_DOCS_URL", "/docs"))
+    docs_url: str | None = Field(default=os.getenv("OPENPOKE_DOCS_URL", "/docs"))
 
     # Summarisation controls
     conversation_summary_threshold: int = Field(default=100)
     conversation_summary_tail_size: int = Field(default=10)
+    conversation_recent_entries_limit: int = Field(default=8)
 
     @property
-    def cors_allow_origins(self) -> List[str]:
+    def cors_allow_origins(self) -> list[str]:
         """Parse CORS origins from comma-separated string."""
         if self.cors_allow_origins_raw.strip() in {"", "*"}:
             return ["*"]
-        return [origin.strip() for origin in self.cors_allow_origins_raw.split(",") if origin.strip()]
+        return [
+            origin.strip()
+            for origin in self.cors_allow_origins_raw.split(",")
+            if origin.strip()
+        ]
 
     @property
-    def resolved_docs_url(self) -> Optional[str]:
+    def resolved_docs_url(self) -> str | None:
         """Return documentation URL when docs are enabled."""
         return (self.docs_url or "/docs") if self.enable_docs else None
 

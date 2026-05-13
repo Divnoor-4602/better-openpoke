@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from server.services.execution import get_execution_agent_logs
 from server.services.timezone_store import get_timezone_store
 from server.services.triggers import TriggerRecord, get_trigger_service
 
-_SCHEMAS: List[Dict[str, Any]] = [
+_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -92,17 +94,18 @@ _SCHEMAS: List[Dict[str, Any]] = [
 
 _LOG_STORE = get_execution_agent_logs()
 _TRIGGER_SERVICE = get_trigger_service()
+_INTEGER_PATTERN = re.compile(r"^-?\d+$")
 
 
 # Return trigger tool schemas
-def get_schemas() -> List[Dict[str, Any]]:
+def get_schemas() -> list[dict[str, Any]]:
     """Return trigger tool schemas."""
 
     return _SCHEMAS
 
 
 # Convert TriggerRecord to dictionary payload for API responses
-def _trigger_record_to_payload(record: TriggerRecord) -> Dict[str, Any]:
+def _trigger_record_to_payload(record: TriggerRecord) -> dict[str, Any]:
     return {
         "id": record.id,
         "payload": record.payload,
@@ -122,10 +125,10 @@ def _create_trigger_tool(
     *,
     agent_name: str,
     payload: str,
-    recurrence_rule: Optional[str] = None,
-    start_time: Optional[str] = None,
-    status: Optional[str] = None,
-) -> Dict[str, Any]:
+    recurrence_rule: str | None = None,
+    start_time: str | None = None,
+    status: str | None = None,
+) -> dict[str, Any]:
     timezone_value = get_timezone_store().get_timezone()
     summary_args = {
         "recurrence_rule": recurrence_rule,
@@ -167,15 +170,19 @@ def _create_trigger_tool(
 def _update_trigger_tool(
     *,
     agent_name: str,
-    trigger_id: Any,
-    payload: Optional[str] = None,
-    recurrence_rule: Optional[str] = None,
-    start_time: Optional[str] = None,
-    status: Optional[str] = None,
-) -> Dict[str, Any]:
-    try:
+    trigger_id: object,
+    payload: str | None = None,
+    recurrence_rule: str | None = None,
+    start_time: str | None = None,
+    status: str | None = None,
+) -> dict[str, Any]:
+    if isinstance(trigger_id, bool):
+        return {"error": "trigger_id must be an integer"}
+    if isinstance(trigger_id, int):
+        trigger_id_int = trigger_id
+    elif isinstance(trigger_id, str) and _INTEGER_PATTERN.fullmatch(trigger_id.strip()):
         trigger_id_int = int(trigger_id)
-    except (TypeError, ValueError):
+    else:
         return {"error": "trigger_id must be an integer"}
 
     try:
@@ -215,7 +222,7 @@ def _update_trigger_tool(
 
 
 # List all triggers belonging to this execution agent
-def _list_triggers_tool(*, agent_name: str) -> Dict[str, Any]:
+def _list_triggers_tool(*, agent_name: str) -> dict[str, Any]:
     try:
         records = _TRIGGER_SERVICE.list_triggers(agent_name=agent_name)
     except Exception as exc:  # pragma: no cover - defensive
@@ -233,7 +240,7 @@ def _list_triggers_tool(*, agent_name: str) -> Dict[str, Any]:
 
 
 # Return trigger tool callables bound to a specific agent
-def build_registry(agent_name: str) -> Dict[str, Callable[..., Any]]:
+def build_registry(agent_name: str) -> dict[str, Callable[..., object]]:
     """Return trigger tool callables bound to a specific agent."""
 
     return {

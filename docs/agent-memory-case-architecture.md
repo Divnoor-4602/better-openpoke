@@ -4,7 +4,8 @@ This document captures the target architecture for OpenPoke's agent system as it
 
 ## 1. Core Problem
 
-The current system has an interaction agent that can create execution agents in parallel for different tasks.
+The current system has an interaction agent that can create execution workers in
+parallel for different tasks.
 
 Example:
 
@@ -14,10 +15,9 @@ Interaction agent creates:
   - Gmail execution agent
 ```
 
-Today, an execution agent is persistent mostly by name and log file:
+Historically, an execution agent was persistent mostly by name and log file:
 
 ```text
-server/data/execution_agents/roster.json
 server/data/execution_agents/<agent-slug>.log
 ```
 
@@ -73,32 +73,32 @@ User
   v
 InteractionAgentRuntime
   |
-  | send_message_to_agent(agent_name, instructions)
+  | send_message_to_agent(memory_id, instructions)
   v
 ExecutionBatchManager
   |
-  | async execution jobs
+  | async execution jobs + durable execution events
   v
-ExecutionAgentRuntime(agent_name)
+ExecutionAgentRuntime(memory_id)
 ```
 
 The interaction agent:
 
 - owns user-facing conversation flow
 - records user messages and replies in the conversation log
-- sees active execution agent names in its prompt
-- can send work to execution agents with `send_message_to_agent`
-- can receive execution results through `handle_agent_message`
+- sees relevant memories and active execution runs in its prompt
+- can send work to disposable execution workers with `send_message_to_agent`
+- can receive completed execution results through `handle_agent_message`
 
 The execution agent:
 
 - is created fresh for each execution request
-- loads prior memory by reading its agent-specific log file
+- loads prior context from the memory store
 - runs LLM/tool loops
-- records actions, tool responses, and final responses
+- records structured execution events, tool responses, memory events, and final responses
 - returns a final result to the batch manager
 
-Current batching is fan-out/fan-in:
+Current execution is fan-out with independent completion:
 
 ```text
 Agent A starts
@@ -106,20 +106,24 @@ Agent B starts
 Agent C starts
 
 Agent B finishes first
-  -> result stored in batch
-  -> no user-facing result yet
+  -> its run records agent-response/status events
+  -> execution stream can continue this run immediately
 
 Agent A finishes
-  -> result stored in batch
+  -> its run records agent-response/status events
 
 Agent C finishes
-  -> pending becomes 0
-  -> combined batch result sent to interaction agent
+  -> its run records agent-response/status events
 ```
 
-The batch manager emits one combined result after every pending execution in the active batch finishes. It does not stream partial worker results to the user.
+The batch manager no longer waits for every sibling execution before exposing
+results. Each execution run has its own durable `request_id`, status, and event
+log. The interaction chat stream submits work and ends quickly; run continuation
+is owned by the execution stream.
 
-Important caveat: current batching is based on one active batch state, not a strict user-turn ID. If a second user message starts new execution work while a first batch is still open, the new work can join the active batch.
+Important caveat: the in-process live event broker is local to one Python
+process. SQLite replay is durable, but live subscriptions are not a distributed
+pub/sub system.
 
 ## 3. Target High-Level Architecture
 
@@ -160,6 +164,8 @@ Decision:
 ```
 
 The interaction agent should receive a compact ranked context pack, not a full list of workers.
+It also receives a compact `<active_execution_runs>` section so it can avoid
+submitting duplicate work that is already queued or running.
 
 ## 4. Main Design Principle
 
@@ -261,6 +267,85 @@ type Case = {
 For Gmail, `entityId` should usually become the Gmail `threadId`. Gmail's `threads` resource groups replies with the original message into one conversation and can retrieve all messages in that conversation in order. This makes `gmailThreadId` the correct durable freshness handle for email workflows.
 
 Reference: https://developers.google.com/workspace/gmail/api/guides/threads
+
+### 5.1.1 Current Gmail Parent/Child Memory Rule
+
+The current implementation has an important practical split:
+
+```text
+parent execution memory = broad user task / worker run
+child Gmail memory      = one Gmail thread/draft/send context
+```
+
+Example user task:
+
+```text
+Send three identical emails to Alice, Bob, and Carol.
+```
+
+This should not become one Gmail memory containing all three people. The expected
+shape is:
+
+```text
+Parent memory: Send three identical emails
+  - execution_request
+  - tool_call / tool_result events
+  - execution_response
+  - child_memory links only
+
+Child memory A: Draft/Sent email to Alice
+  - gmail_thread: thread_a
+  - gmail_draft: draft_a
+  - gmail_message: message_a
+  - email_address: alice@example.com
+  - gmail_draft_created
+  - gmail_draft_sent
+
+Child memory B: Draft/Sent email to Bob
+  - gmail_thread: thread_b
+  - gmail_draft: draft_b
+  - gmail_message: message_b
+  - email_address: bob@example.com
+  - gmail_draft_created
+  - gmail_draft_sent
+```
+
+The parent memory may point at children with:
+
+```text
+child_memory: mem_...
+```
+
+It should not copy child Gmail links such as `gmail_thread`, `gmail_draft`,
+`gmail_message`, or `email_address` onto the parent. Copying those links to the
+parent makes exact-link search retrieve the broad parent task when the user is
+really asking about a specific person or Gmail thread.
+
+The classification rule is:
+
+```text
+Gmail action has thread/draft/message/recipient links
+  -> resolve or create a Gmail-specific child memory
+  -> store Gmail events on that child memory
+  -> record a parent child_memory reference if an execution parent exists
+
+Execution tool call/result/final response
+  -> remains on the parent execution memory
+```
+
+Child Gmail memory titles should preserve useful recipient/subject information:
+
+```text
+Draft email to alice@example.com: Proposal follow-up
+Sent email to bob@example.com: Q3 budget
+```
+
+A later send event must not overwrite that title with a weak draft-id-only title
+such as:
+
+```text
+Sent email r123456789
+```
 
 ### 5.2 CaseEntity
 

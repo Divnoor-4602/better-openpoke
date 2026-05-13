@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Optional
 
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -14,10 +13,10 @@ from ..logging_config import logger
 class TimezoneStore:
     """Stores a single timezone string supplied by the client UI."""
 
-    def __init__(self, path: Path):
-        self._path = path
-        self._lock = threading.Lock()
-        self._cached: Optional[str] = None
+    def __init__(self, path: Path) -> None:
+        self._path: Path = path
+        self._lock: threading.Lock = threading.Lock()
+        self._cached: str | None = None
         self._load()
 
     def _load(self) -> None:
@@ -41,7 +40,7 @@ class TimezoneStore:
         validated = self._validate(timezone_name)
         with self._lock:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(validated, encoding="utf-8")
+            _ = self._path.write_text(validated, encoding="utf-8")
             self._cached = validated
             logger.info("updated timezone preference", extra={"timezone": validated})
 
@@ -50,7 +49,7 @@ class TimezoneStore:
             self._cached = None
             try:
                 if self._path.exists():
-                    self._path.unlink()
+                    _ = self._path.unlink()
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning("failed to clear timezone file", extra={"error": str(exc)})
 
@@ -59,7 +58,7 @@ class TimezoneStore:
         if not candidate:
             raise ValueError("timezone must be a non-empty string")
         try:
-            ZoneInfo(candidate)
+            _ = ZoneInfo(candidate)
         except ZoneInfoNotFoundError as exc:
             raise ValueError(f"Unknown timezone: {candidate}") from exc
         return candidate

@@ -1,19 +1,14 @@
 """Execution Agent implementation."""
 
 from pathlib import Path
-from typing import List, Optional, Dict, Any
 
 from ...services.execution import get_execution_agent_logs
-from ...logging_config import logger
+from ...services.execution.log_store import ExecutionAgentLogStore
 
 
 # Load system prompt template from file
 _prompt_path = Path(__file__).parent / "system_prompt.md"
-if _prompt_path.exists():
-    SYSTEM_PROMPT_TEMPLATE = _prompt_path.read_text(encoding="utf-8").strip()
-else:
-    # Placeholder template - you'll replace this with actual instructions
-    SYSTEM_PROMPT_TEMPLATE = """You are an execution agent responsible for completing specific tasks using available tools.
+_FALLBACK_SYSTEM_PROMPT_TEMPLATE = """You are an execution agent responsible for completing specific tasks using available tools.
 
 Agent Name: {agent_name}
 Purpose: {agent_purpose}
@@ -27,6 +22,11 @@ You have access to Gmail tools to help complete your tasks. When given instructi
 3. Provide clear status updates on your actions
 
 Be thorough, accurate, and efficient in your execution."""
+SYSTEM_PROMPT_TEMPLATE = (
+    _prompt_path.read_text(encoding="utf-8").strip()
+    if _prompt_path.exists()
+    else _FALLBACK_SYSTEM_PROMPT_TEMPLATE
+)
 
 
 class ExecutionAgent:
@@ -36,7 +36,9 @@ class ExecutionAgent:
     def __init__(
         self,
         name: str,
-        conversation_limit: Optional[int] = None
+        display_name: str | None = None,
+        memory_context: str = "",
+        conversation_limit: int | None = None
     ):
         """
         Initialize an execution agent.
@@ -45,19 +47,24 @@ class ExecutionAgent:
             name: Human-readable agent name (e.g., 'conversation with keith')
             conversation_limit: Optional limit on past conversations to include (None = all)
         """
-        self.name = name
-        self.conversation_limit = conversation_limit
-        self._log_store = get_execution_agent_logs()
+        self.name: str = name
+        self.display_name: str = display_name or name
+        self.memory_context: str = memory_context
+        self.conversation_limit: int | None = conversation_limit
+        self._log_store: ExecutionAgentLogStore = get_execution_agent_logs()
 
     # Generate system prompt template with agent name and purpose derived from name
     def build_system_prompt(self) -> str:
         """Build the system prompt for this agent."""
-        agent_purpose = f"Handle tasks related to: {self.name}"
+        agent_purpose = f"Handle tasks related to: {self.display_name}"
 
-        return SYSTEM_PROMPT_TEMPLATE.format(
-            agent_name=self.name,
+        prompt = SYSTEM_PROMPT_TEMPLATE.format(
+            agent_name=self.display_name,
             agent_purpose=agent_purpose
         )
+        if self.memory_context.strip():
+            return f"{prompt}\n\n# Memory Context\n\n{self.memory_context}"
+        return prompt
 
     # Combine base system prompt with conversation history, applying conversation limits
     def build_system_prompt_with_history(self) -> str:
@@ -96,7 +103,7 @@ class ExecutionAgent:
         return base_prompt
 
     # Format current instruction as user message for LLM consumption
-    def build_messages_for_llm(self, current_instruction: str) -> List[Dict[str, str]]:
+    def build_messages_for_llm(self, current_instruction: str) -> list[dict[str, str]]:
         """
         Build message array for LLM call.
 

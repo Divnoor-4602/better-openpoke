@@ -6,7 +6,7 @@ import threading
 from datetime import datetime
 from html import escape, unescape
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import cast
 
 from ....logging_config import logger
 from ....utils.timezones import now_in_user_timezone
@@ -27,7 +27,7 @@ def _decode_payload(payload: str) -> str:
     return unescape(payload).replace("\\n", "\n")
 
 
-def _format_line(tag: str, payload: str, timestamp: Optional[str] = None) -> str:
+def _format_line(tag: str, payload: str, timestamp: str | None = None) -> str:
     encoded = _encode_payload(payload)
     if timestamp:
         return f"<{tag} timestamp=\"{timestamp}\">{encoded}</{tag}>\n"
@@ -35,15 +35,15 @@ def _format_line(tag: str, payload: str, timestamp: Optional[str] = None) -> str
 
 
 def _current_timestamp() -> str:
-    return now_in_user_timezone("%Y-%m-%d %H:%M:%S")
+    return str(now_in_user_timezone("%Y-%m-%d %H:%M:%S"))
 
 
 class WorkingMemoryLog:
     """Persisted working-memory file storing conversation summary and recent entries."""
 
     def __init__(self, path: Path) -> None:
-        self._path = path
-        self._lock = threading.Lock()
+        self._path: Path = path
+        self._lock: threading.Lock = threading.Lock()
         self._ensure_directory()
         self._initialize_file()
 
@@ -72,7 +72,7 @@ class WorkingMemoryLog:
             _format_line("conversation_summary", ""),
         ]
         try:
-            self._path.write_text("".join(lines), encoding="utf-8")
+            _ = self._path.write_text("".join(lines), encoding="utf-8")
         except Exception as exc:  # pragma: no cover - defensive
             logger.error(
                 "working memory initialization failed",
@@ -80,13 +80,13 @@ class WorkingMemoryLog:
             )
             raise
 
-    def append_entry(self, tag: str, payload: str, timestamp: Optional[str] = None) -> None:
+    def append_entry(self, tag: str, payload: str, timestamp: str | None = None) -> None:
         sanitized_timestamp = timestamp or _current_timestamp()
         line = _format_line(tag, str(payload), sanitized_timestamp)
         with self._lock:
             try:
                 with self._path.open("a", encoding="utf-8") as handle:
-                    handle.write(line)
+                    _ = handle.write(line)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.error(
                     "working memory append failed",
@@ -109,8 +109,8 @@ class WorkingMemoryLog:
 
         summary_text = ""
         last_index = -1
-        updated_at: Optional[datetime] = None
-        entries: List[LogEntry] = []
+        updated_at: datetime | None = None
+        entries: list[LogEntry] = []
 
         for raw_line in lines:
             parsed = self._parse_line(raw_line)
@@ -119,7 +119,7 @@ class WorkingMemoryLog:
             tag, timestamp, payload = parsed
             if tag == "summary_info":
                 try:
-                    data = json.loads(payload)
+                    data = cast(dict[str, object], json.loads(payload))
                 except json.JSONDecodeError:
                     continue
                 last_index_val = data.get("last_index")
@@ -134,9 +134,7 @@ class WorkingMemoryLog:
             elif tag == "conversation_summary":
                 summary_text = payload
             else:
-                entries.append(
-                    LogEntry(tag=tag, payload=payload, timestamp=timestamp or None)
-                )
+                entries.append(LogEntry(tag=tag, payload=payload, timestamp=timestamp or None))
 
         state = SummaryState(
             summary_text=summary_text,
@@ -163,8 +161,8 @@ class WorkingMemoryLog:
         data = "".join(lines)
         with self._lock:
             try:
-                temp_path.write_text(data, encoding="utf-8")
-                temp_path.replace(self._path)
+                _ = temp_path.write_text(data, encoding="utf-8")
+                _ = temp_path.replace(self._path)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.error(
                     "working memory write failed",
@@ -178,9 +176,9 @@ class WorkingMemoryLog:
                     except Exception:  # pragma: no cover - defensive cleanup
                         pass
 
-    def render_transcript(self, state: Optional[SummaryState] = None) -> str:
+    def render_transcript(self, state: SummaryState | None = None) -> str:
         snapshot = state or self.load_summary_state()
-        parts: List[str] = []
+        parts: list[str] = []
 
         summary_text = (snapshot.summary_text or "").strip()
         if summary_text:
@@ -212,7 +210,7 @@ class WorkingMemoryLog:
                 self._ensure_directory()
                 self._initialize_file_locked()
 
-    def _parse_line(self, line: str) -> Optional[Tuple[str, Optional[str], str]]:
+    def _parse_line(self, line: str) -> tuple[str, str | None, str] | None:
         stripped = line.strip()
         if not stripped.startswith("<") or "</" not in stripped:
             return None
@@ -240,7 +238,7 @@ class WorkingMemoryLog:
         return tag, timestamp, _decode_payload(payload)
 
 
-_working_memory_log: Optional[WorkingMemoryLog] = None
+_working_memory_log: WorkingMemoryLog | None = None
 _factory_lock = threading.Lock()
 
 
@@ -250,6 +248,7 @@ def get_working_memory_log() -> WorkingMemoryLog:
         with _factory_lock:
             if _working_memory_log is None:
                 _working_memory_log = WorkingMemoryLog(_WORKING_MEMORY_LOG_PATH)
+    assert _working_memory_log is not None
     return _working_memory_log
 
 

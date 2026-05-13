@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from zoneinfo import ZoneInfo
 
 from dateutil import parser as date_parser
 from dateutil.rrule import rrulestr
-from zoneinfo import ZoneInfo
 
 from ...logging_config import logger
-
 
 UTC = timezone.utc
 DEFAULT_STATUS = "active"
@@ -27,7 +25,7 @@ def to_storage_timestamp(moment: datetime) -> str:
     return moment.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def resolve_timezone(timezone_name: Optional[str]) -> ZoneInfo:
+def resolve_timezone(timezone_name: str | None) -> ZoneInfo:
     """Return a `ZoneInfo` instance, defaulting to UTC on errors."""
 
     if timezone_name:
@@ -41,7 +39,7 @@ def resolve_timezone(timezone_name: Optional[str]) -> ZoneInfo:
     return ZoneInfo("UTC")
 
 
-def normalize_status(status: Optional[str]) -> str:
+def normalize_status(status: str | None) -> str:
     """Clamp trigger status to the known set."""
 
     if not status:
@@ -77,7 +75,7 @@ def parse_datetime(timestamp: str, tz: ZoneInfo) -> datetime:
 
 
 def coerce_start_datetime(
-    start_time: Optional[str], tz: ZoneInfo, fallback: datetime
+    start_time: str | None, tz: ZoneInfo, fallback: datetime
 ) -> datetime:
     """Return the desired start datetime in the agent's timezone."""
 
@@ -87,10 +85,10 @@ def coerce_start_datetime(
 
 
 def build_recurrence(
-    recurrence_rule: Optional[str],
+    recurrence_rule: str | None,
     start_dt_local: datetime,
     tz: ZoneInfo,
-) -> Optional[str]:
+) -> str | None:
     """Embed DTSTART metadata into the supplied RRULE text."""
 
     if not recurrence_rule:
@@ -102,13 +100,21 @@ def build_recurrence(
         localized_start = start_dt_local.astimezone(tz)
 
     if localized_start.utcoffset() == timedelta(0):
-        dt_line = f"DTSTART:{localized_start.astimezone(UTC).strftime('%Y%m%dT%H%M%SZ')}"
+        dt_line = (
+            f"DTSTART:{localized_start.astimezone(UTC).strftime('%Y%m%dT%H%M%SZ')}"
+        )
     else:
         tz_name = getattr(tz, "key", "UTC")
         dt_line = f"DTSTART;TZID={tz_name}:{localized_start.strftime('%Y%m%dT%H%M%S')}"
 
-    lines = [segment.strip() for segment in recurrence_rule.strip().splitlines() if segment.strip()]
-    filtered = [segment for segment in lines if not segment.upper().startswith("DTSTART")]
+    lines = [
+        segment.strip()
+        for segment in recurrence_rule.strip().splitlines()
+        if segment.strip()
+    ]
+    filtered = [
+        segment for segment in lines if not segment.upper().startswith("DTSTART")
+    ]
     if not filtered:
         raise ValueError("recurrence_rule must contain an RRULE definition")
 
