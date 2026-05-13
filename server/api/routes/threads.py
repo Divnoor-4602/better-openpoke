@@ -198,7 +198,9 @@ async def stream_thread_message(
     if user_message is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing user message")
 
-    user_content = user_message.text_content().strip()
+    user_content = user_message.text_content()
+    if not user_content.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing message content")
     try:
         repository.create_message(
             threadId,
