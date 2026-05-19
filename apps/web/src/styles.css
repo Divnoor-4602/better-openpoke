@@ -7,6 +7,13 @@
 @plugin "@tailwindcss/typography";
 @source "../node_modules/streamdown/dist/index.js";
 
+/* Scope `dark:` utilities to a `.dark` class ancestor — the app has no dark
+   palette and never toggles `.dark`, so this makes every `dark:*` selector
+   inert. Without this declaration Tailwind v4 falls back to
+   `@media (prefers-color-scheme: dark)` and shadcn primitives (e.g. the
+   outline button's `dark:bg-input/32`) tint themselves on OS dark mode. */
+@custom-variant dark (&:is(.dark *));
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
