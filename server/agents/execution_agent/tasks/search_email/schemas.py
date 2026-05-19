@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,7 +11,7 @@ TASK_TOOL_NAME = "task_email_search"
 SEARCH_TOOL_NAME = "gmail_fetch_emails"
 COMPLETE_TOOL_NAME = "return_search_results"
 
-_SCHEMAS: list[dict[str, Any]] = [
+_SCHEMAS: list[dict[str, object]] = [
     {
         "type": "function",
         "function": {
@@ -36,23 +36,23 @@ _SCHEMAS: list[dict[str, Any]] = [
 class GmailSearchEmail(BaseModel):
     """Clean email representation with enhanced content processing."""
 
-    model_config = ConfigDict(extra="ignore", frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore", frozen=True)
 
     # Core identifiers
     id: str  # message_id from Gmail API
     thread_id: str | None = None
     query: str  # The search query that found this email
-    
+
     # Email metadata
     subject: str
     sender: str
     recipient: str  # to field
     timestamp: datetime
     label_ids: list[str] = Field(default_factory=list)
-    
+
     # Clean content (primary field for LLM consumption)
     clean_text: str  # Processed, readable email content
-    
+
     # Attachment information
     has_attachments: bool = False
     attachment_count: int = 0
@@ -73,12 +73,12 @@ class EmailSearchToolResult(BaseModel):
 class TaskEmailSearchPayload(BaseModel):
     """Envelope for the final email selection."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", frozen=True)
 
     emails: list[GmailSearchEmail]
 
 
-_COMPLETION_SCHEMAS: list[dict[str, Any]] = [
+_COMPLETION_SCHEMAS: list[dict[str, object]] = [
     {
         "type": "function",
         "function": {
@@ -100,11 +100,12 @@ _COMPLETION_SCHEMAS: list[dict[str, Any]] = [
     }
 ]
 
-def get_completion_schema() -> dict[str, Any]:
+
+def get_completion_schema() -> dict[str, object]:
     return _COMPLETION_SCHEMAS[0]
 
 
-def get_schemas() -> list[dict[str, Any]]:
+def get_schemas() -> list[dict[str, object]]:
     """Return the JSON schema for the email search task."""
 
     return _SCHEMAS

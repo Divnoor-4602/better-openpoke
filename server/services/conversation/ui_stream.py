@@ -90,6 +90,11 @@ class DataExecutionEventPart(TypedDict):
     data: JsonValue
 
 
+class DataAgentEventPart(TypedDict):
+    type: Literal["data-agent-event"]
+    data: JsonValue
+
+
 class ErrorPart(TypedDict):
     type: Literal["error"]
     errorText: str
@@ -110,6 +115,7 @@ UiStreamPart: TypeAlias = (
     | ToolInputDeltaPart
     | ToolInputAvailablePart
     | ToolOutputAvailablePart
+    | DataAgentEventPart
     | DataExecutionEventPart
     | ErrorPart
 )
@@ -203,6 +209,13 @@ def data_execution_event(payload: Mapping[str, object]) -> DataExecutionEventPar
     }
 
 
+def data_agent_event(payload: Mapping[str, object]) -> DataAgentEventPart:
+    return {
+        "type": "data-agent-event",
+        "data": _json_object(cast(Mapping[object, object], payload)),
+    }
+
+
 def error_part(error_text: str) -> ErrorPart:
     return {"type": "error", "errorText": error_text}
 
@@ -226,6 +239,7 @@ def _json_object(payload: Mapping[object, object]) -> JsonObject:
 
 __all__ = [
     "DONE",
+    "DataAgentEventPart",
     "DataExecutionEventPart",
     "ErrorPart",
     "FinishMessagePart",
@@ -246,6 +260,7 @@ __all__ = [
     "ToolInputStartPart",
     "ToolOutputAvailablePart",
     "UiStreamPart",
+    "data_agent_event",
     "data_execution_event",
     "error_part",
     "finish_message",

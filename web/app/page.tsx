@@ -15,6 +15,8 @@ const POLL_INTERVAL_MS = 2500;
 
 type ExecutionPart = {
   id?: number | null;
+  runId?: string;
+  sequence?: number;
   type?: string;
   state?: string | null;
   toolName?: string | null;
@@ -27,8 +29,10 @@ type ExecutionPart = {
 };
 
 type ExecutionRun = {
+  runId?: string;
   requestId?: string;
   memoryId?: string;
+  scope?: 'interaction' | 'execution';
   parentMemoryId?: string | null;
   title?: string;
   status?: string;
@@ -92,23 +96,23 @@ const statusLinesFromParts = (parts: any[]): string[] => {
       add(`Loading - ${toolNameFromPart(part)}`);
       continue;
     }
-    if (part?.type !== 'data-execution-event') continue;
+    if (part?.type !== 'data-agent-event' && part?.type !== 'data-execution-event') continue;
     const payload = part.data || {};
     const event = payload.event || {};
     const taskTitle = payload.title || payload.memoryId || 'Task';
-    if (event.type === 'status' && event.state === 'queued') {
+    if ((event.type === 'status' || event.type === 'execution.submitted') && event.state === 'queued') {
       add(`Waiting - ${taskTitle}`);
-    } else if (event.type === 'status' && event.state === 'running') {
+    } else if ((event.type === 'status' || event.type === 'run.started') && event.state === 'running') {
       add(`Working - ${taskTitle}`);
-    } else if (event.type === 'tool-call' && event.state === 'input-available') {
+    } else if ((event.type === 'tool-call' || event.type === 'tool.input.available') && event.state === 'input-available') {
       add(`Loading - ${toolNameFromPart({ ...event, type: `tool-${event.toolName || 'tool'}` })}`);
-    } else if (event.type === 'tool-result' && event.state === 'output-available') {
+    } else if ((event.type === 'tool-result' || event.type === 'tool.output.available') && event.state === 'output-available') {
       add(`${toolNameFromPart({ ...event, type: `tool-${event.toolName || 'tool'}` })} complete`);
-    } else if (event.type === 'tool-result' && event.state === 'output-error') {
+    } else if ((event.type === 'tool-result' || event.type === 'tool.output.error') && event.state === 'output-error') {
       add(`${toolNameFromPart({ ...event, type: `tool-${event.toolName || 'tool'}` })} failed`);
-    } else if (event.type === 'status' && event.state === 'completed') {
+    } else if ((event.type === 'status' || event.type === 'run.completed') && event.state === 'completed') {
       add(`${taskTitle} complete`);
-    } else if (event.type === 'status' && event.state === 'failed') {
+    } else if ((event.type === 'status' || event.type === 'run.failed') && event.state === 'failed') {
       add(`${taskTitle} failed`);
     }
   }
@@ -120,22 +124,27 @@ const streamEventsToRuns = (messages: any[]): ExecutionRun[] => {
   const byId = new Map<string, ExecutionRun>();
   for (const message of messages) {
     for (const part of message?.parts || []) {
-      if (part?.type !== 'data-execution-event') continue;
+      if (part?.type !== 'data-agent-event' && part?.type !== 'data-execution-event') continue;
       const payload = part.data || {};
       const event = payload.event || {};
-      const requestId = payload.requestId || payload.request_id;
+      if (payload.scope === 'interaction') continue;
+      const requestId = payload.requestId || payload.runId || payload.request_id;
       if (!requestId) continue;
       const run: ExecutionRun = byId.get(requestId) || {
+        runId: payload.runId || requestId,
         requestId,
         memoryId: payload.memoryId,
         parentMemoryId: payload.parentMemoryId,
+        scope: payload.scope || 'execution',
         title: payload.title || payload.memoryId,
         status: 'running',
         parts: [],
       };
+      run.runId = payload.runId || run.runId;
       run.memoryId = payload.memoryId || run.memoryId;
+      run.scope = payload.scope || run.scope;
       run.parentMemoryId = payload.parentMemoryId || run.parentMemoryId;
-      if (event.type === 'status' && event.state) run.status = event.state;
+      if ((event.type === 'status' || event.type?.startsWith?.('run.')) && event.state) run.status = event.state;
       if (event.state === 'completed') run.ok = true;
       if (event.state === 'failed' || event.state === 'output-error') run.ok = false;
       run.parts = [...(run.parts || []), event];
@@ -167,7 +176,12 @@ const mergeExecutionRuns = (storedRuns: ExecutionRun[], streamedRuns: ExecutionR
 const dedupeParts = (parts: ExecutionPart[]): ExecutionPart[] => {
   const seen = new Set<string>();
   return parts.filter((part, index) => {
-    const key = part.id != null ? `id:${part.id}` : `${part.createdAt || ''}:${part.type || ''}:${index}`;
+    const key =
+      part.id != null
+        ? `id:${part.id}`
+        : part.runId && part.sequence != null
+          ? `${part.runId}:${part.sequence}`
+          : `${part.createdAt || ''}:${part.type || ''}:${index}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -289,7 +303,8 @@ export default function Page() {
   }, []);
 
   const applyExecutionEvent = useCallback((payload: any) => {
-    const requestId = payload?.requestId;
+    if (payload?.scope === 'interaction') return;
+    const requestId = payload?.requestId || payload?.runId;
     const event = payload?.event || {};
     if (!requestId) return;
 
@@ -297,11 +312,16 @@ export default function Page() {
       const existing = prev.find(run => run.requestId === requestId);
       const nextRun: ExecutionRun = {
         ...(existing || {}),
+        runId: payload.runId || existing?.runId || requestId,
         requestId,
         memoryId: payload.memoryId || existing?.memoryId,
+        scope: payload.scope || existing?.scope || 'execution',
         parentMemoryId: payload.parentMemoryId || existing?.parentMemoryId,
         title: payload.title || existing?.title || payload.memoryId,
-        status: event.type === 'status' && event.state ? event.state : existing?.status || 'running',
+        status:
+          (event.type === 'status' || event.type?.startsWith?.('run.')) && event.state
+            ? event.state
+            : existing?.status || 'running',
         ok:
           event.state === 'completed'
             ? true
@@ -356,7 +376,7 @@ export default function Page() {
         }
         try {
           const chunk = JSON.parse(event.data);
-          if (chunk.type === 'data-execution-event') {
+          if (chunk.type === 'data-agent-event' || chunk.type === 'data-execution-event') {
             applyExecutionEvent(chunk.data);
           } else if (chunk.type === 'text-start') {
             streamedRunTextRef.current.set(requestId, '');

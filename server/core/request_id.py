@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
 
 from fastapi import Request, Response
+from starlette.middleware.base import RequestResponseEndpoint
 
 REQUEST_ID_HEADER = "x-request-id"
 
@@ -17,7 +17,7 @@ def get_request_id(request: Request) -> str:
 
 async def request_id_middleware(
     request: Request,
-    call_next: Callable[[Request], object],
+    call_next: RequestResponseEndpoint,
 ) -> Response:
     incoming = request.headers.get(REQUEST_ID_HEADER)
     stripped = incoming.strip() if incoming else ""

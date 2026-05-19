@@ -9,6 +9,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 from ..agents.interaction_agent.runtime import InteractionAgentRuntime
+from ..core.workspace_context import require_current_workspace
 from ..services.conversation import ui_stream
 from ..services.execution import (
     ExecutionEvent,
@@ -90,9 +91,12 @@ def execution_run_stream(
     after_id: Annotated[int, Query(alias="afterId")] = 0,
 ) -> StreamingResponse:
     store = get_execution_event_store()
+    workspace_id = require_current_workspace()
 
     async def event_stream() -> AsyncIterator[str]:
-        subscription = store.subscribe({request_id})
+        subscription = store.subscribe(
+            workspace_id=workspace_id, request_ids={request_id}
+        )
         try:
             run = store.get_run(request_id)
             if run is None:
@@ -106,7 +110,7 @@ def execution_run_stream(
             yield ui_stream.sse_part(ui_stream.start_message(f"execution-{request_id}"))
             terminal = False
             for event in store.list_events(request_id, after_id=after_id):
-                payload = _execution_event_payload(run, event)
+                payload = _execution_event_payload(workspace_id, run, event)
                 async for chunk in _stream_execution_event_payload(
                     payload, generate_interaction=False
                 ):
@@ -152,6 +156,7 @@ def execution_run_stream(
 async def _stream_execution_event_payload(
     payload: ExecutionEventPayload, *, generate_interaction: bool
 ) -> AsyncIterator[str]:
+    yield ui_stream.sse_part(ui_stream.data_agent_event(payload))
     yield ui_stream.sse_part(ui_stream.data_execution_event(payload))
     if not generate_interaction:
         return
@@ -160,12 +165,17 @@ async def _stream_execution_event_payload(
 
 
 def _execution_event_payload(
-    run: ExecutionRun, event: ExecutionEvent
+    workspace_id: str, run: ExecutionRun, event: ExecutionEvent
 ) -> ExecutionEventPayload:
     return {
+        "workspaceId": workspace_id,
+        "runId": run["runId"],
         "requestId": run["requestId"],
         "memoryId": run["memoryId"],
+        "threadId": run["threadId"],
         "parentMemoryId": run["parentMemoryId"],
+        "parentRunId": run["parentRunId"],
+        "scope": run["scope"],
         "title": run["title"],
         "event": event,
     }
@@ -183,7 +193,9 @@ async def _agent_response_text_chunks(
     payload: ExecutionEventPayload,
 ) -> AsyncIterator[str]:
     event = payload["event"]
-    if event["type"] != "agent-response" or not isinstance(event["text"], str):
+    if event["type"] not in {"agent-response", "message.created"} or not isinstance(
+        event["text"], str
+    ):
         return
     text = event["text"].strip()
     if not text:
@@ -239,8 +251,11 @@ def _run_to_agent_compat(run: ExecutionRun) -> dict[str, object]:
         ],
         "parts": parts,
         "requestId": run["requestId"],
+        "runId": run["runId"],
         "memoryId": run["memoryId"],
         "parentMemoryId": run["parentMemoryId"],
+        "parentRunId": run["parentRunId"],
+        "scope": run["scope"],
     }
 
 

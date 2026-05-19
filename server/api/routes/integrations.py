@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 
 from ...config import Settings, get_settings
 from ...core.errors import ERROR_RESPONSES
-from ...integrations.gmail import connect_gmail, disconnect_gmail, get_gmail_status
-from ...models.gmail import GmailConnectPayload, GmailDisconnectPayload, GmailStatusPayload
+from ...core.workspace_context import require_current_workspace
+from ...integrations.google import connect_google, disconnect_google, get_google_status
+from ...models.google import (
+    GoogleConnectPayload,
+    GoogleDisconnectPayload,
+    GoogleStatusPayload,
+)
 from ..schemas import (
     IntegrationConnectRequest,
     IntegrationConnectResponse,
@@ -36,13 +41,18 @@ router = APIRouter(
 def connect_integration(
     provider: Provider,
     payload: IntegrationConnectRequest,
-    settings: Settings = Depends(get_settings),
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> IntegrationConnectResponse:
     _assert_provider(provider)
-    response = connect_gmail(
-        GmailConnectPayload(
-            user_id=payload.userId,
-            auth_config_id=payload.authConfigId,
+    # Always scope Composio connection to the caller's workspace, even if the
+    # client supplied a userId — testers can't impersonate each other's Gmail.
+    workspace_id = require_current_workspace()
+    auth_config_id = payload.authConfigId or settings.composio_google_auth_config_id
+    response = connect_google(
+        GoogleConnectPayload(
+            user_id=workspace_id,
+            auth_config_id=auth_config_id,
+            return_to=payload.returnTo,
         ),
         settings,
     )
@@ -66,9 +76,10 @@ def retrieve_integration_status(
     payload: IntegrationStatusRequest,
 ) -> IntegrationStatusResponse:
     _assert_provider(provider)
-    response = get_gmail_status(
-        GmailStatusPayload(
-            user_id=payload.userId,
+    workspace_id = require_current_workspace()
+    response = get_google_status(
+        GoogleStatusPayload(
+            user_id=workspace_id,
             connection_request_id=payload.connectionRequestId,
         )
     )
@@ -80,7 +91,7 @@ def retrieve_integration_status(
         status=str(data.get("status") or "UNKNOWN"),
         email=_optional_str(data.get("email")),
         userId=_optional_str(data.get("user_id")),
-        profile=profile if isinstance(profile, dict) else None,
+        profile=cast(dict[str, object], profile) if isinstance(profile, dict) else None,
         profileSource=str(data.get("profile_source") or "none"),
     )
 
@@ -96,9 +107,10 @@ def disconnect_integration(
     payload: IntegrationDisconnectRequest,
 ) -> IntegrationDisconnectResponse:
     _assert_provider(provider)
-    response = disconnect_gmail(
-        GmailDisconnectPayload(
-            user_id=payload.userId,
+    workspace_id = require_current_workspace()
+    response = disconnect_google(
+        GoogleDisconnectPayload(
+            user_id=workspace_id,
             connection_id=payload.connectionId,
             connection_request_id=payload.connectionRequestId,
         )
@@ -106,29 +118,54 @@ def disconnect_integration(
     data = _ok_payload(response)
     removed = data.get("removed_connection_ids")
     warnings = data.get("warnings")
+    removed_ids: list[str] = (
+        [str(item) for item in cast(list[object], removed)]
+        if isinstance(removed, list)
+        else []
+    )
+    warning_strs: list[str] = (
+        [str(item) for item in cast(list[object], warnings)]
+        if isinstance(warnings, list)
+        else []
+    )
     return IntegrationDisconnectResponse(
         ok=True,
         disconnected=bool(data.get("disconnected")),
-        removedConnectionIds=removed if isinstance(removed, list) else [],
+        removedConnectionIds=removed_ids,
         message=_optional_str(data.get("message")),
-        warnings=warnings if isinstance(warnings, list) else [],
+        warnings=warning_strs,
     )
 
 
 def _assert_provider(provider: Provider) -> None:
-    if provider != "gmail":  # pragma: no cover - Literal validation handles this
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Integration provider not found")
+    # `Provider` is a Literal["google"] today; the check is statically
+    # unreachable but kept as a runtime guard for when other providers land.
+    if provider != "google":
+        raise HTTPException(  # pyright: ignore[reportUnreachable]
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Integration provider not found",
+        )
 
 
-def _ok_payload(response: JSONResponse) -> dict[str, Any]:
-    data = json.loads(response.body.decode("utf-8"))
-    if not isinstance(data, dict):
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid provider response")
+def _ok_payload(response: JSONResponse) -> dict[str, object]:
+    raw_data = cast(object, json.loads(bytes(response.body).decode("utf-8")))
+    if not isinstance(raw_data, dict):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Invalid provider response",
+        )
+    data = cast(dict[str, object], raw_data)
     if response.status_code >= 400 or data.get("ok") is False:
-        status_code = response.status_code if response.status_code >= 400 else status.HTTP_502_BAD_GATEWAY
+        status_code = (
+            response.status_code
+            if response.status_code >= 400
+            else status.HTTP_502_BAD_GATEWAY
+        )
         raise HTTPException(
             status_code=status_code,
-            detail=data.get("detail") or data.get("error") or "Integration request failed",
+            detail=data.get("detail")
+            or data.get("error")
+            or "Integration request failed",
         )
     return data
 

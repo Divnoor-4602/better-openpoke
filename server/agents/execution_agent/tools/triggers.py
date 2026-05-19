@@ -6,13 +6,14 @@ import json
 import re
 from collections.abc import Callable
 from functools import partial
-from typing import Any
 
+from server.logging_config import logger
+from server.services.conversation.log import get_conversation_log
 from server.services.execution import get_execution_agent_logs
 from server.services.timezone_store import get_timezone_store
 from server.services.triggers import TriggerRecord, get_trigger_service
 
-_SCHEMAS: list[dict[str, Any]] = [
+_SCHEMAS: list[dict[str, object]] = [
     {
         "type": "function",
         "function": {
@@ -92,20 +93,20 @@ _SCHEMAS: list[dict[str, Any]] = [
     },
 ]
 
-_LOG_STORE = get_execution_agent_logs()
+# Per-workspace log lookup deferred to call time (no module-level capture).
 _TRIGGER_SERVICE = get_trigger_service()
 _INTEGER_PATTERN = re.compile(r"^-?\d+$")
 
 
 # Return trigger tool schemas
-def get_schemas() -> list[dict[str, Any]]:
+def get_schemas() -> list[dict[str, object]]:
     """Return trigger tool schemas."""
 
     return _SCHEMAS
 
 
 # Convert TriggerRecord to dictionary payload for API responses
-def _trigger_record_to_payload(record: TriggerRecord) -> dict[str, Any]:
+def _trigger_record_to_payload(record: TriggerRecord) -> dict[str, object]:
     return {
         "id": record.id,
         "payload": record.payload,
@@ -128,7 +129,7 @@ def _create_trigger_tool(
     recurrence_rule: str | None = None,
     start_time: str | None = None,
     status: str | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     timezone_value = get_timezone_store().get_timezone()
     summary_args = {
         "recurrence_rule": recurrence_rule,
@@ -146,16 +147,26 @@ def _create_trigger_tool(
             status=status,
         )
     except Exception as exc:  # pragma: no cover - defensive
-        _LOG_STORE.record_action(
+        get_execution_agent_logs().record_action(
             agent_name,
             description=f"createTrigger failed | details={json.dumps(summary_args, ensure_ascii=False)} | error={exc}",
         )
         return {"error": str(exc)}
 
-    _LOG_STORE.record_action(
+    get_execution_agent_logs().record_action(
         agent_name,
         description=f"createTrigger succeeded | trigger_id={record.id}",
     )
+    try:
+        get_conversation_log().record_reminder_set(
+            payload,
+            fires_at=record.next_trigger or record.start_time or "",
+        )
+    except Exception as exc:  # pragma: no cover - best-effort log entry
+        logger.debug(
+            "record_reminder_set failed",
+            extra={"trigger_id": record.id, "error": str(exc)},
+        )
     return {
         "trigger_id": record.id,
         "status": record.status,
@@ -175,7 +186,7 @@ def _update_trigger_tool(
     recurrence_rule: str | None = None,
     start_time: str | None = None,
     status: str | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     if isinstance(trigger_id, bool):
         return {"error": "trigger_id must be an integer"}
     if isinstance(trigger_id, int):
@@ -197,7 +208,7 @@ def _update_trigger_tool(
             status=status,
         )
     except Exception as exc:  # pragma: no cover - defensive
-        _LOG_STORE.record_action(
+        get_execution_agent_logs().record_action(
             agent_name,
             description=f"updateTrigger failed | id={trigger_id_int} | error={exc}",
         )
@@ -206,7 +217,7 @@ def _update_trigger_tool(
     if record is None:
         return {"error": f"Trigger {trigger_id_int} not found"}
 
-    _LOG_STORE.record_action(
+    get_execution_agent_logs().record_action(
         agent_name,
         description=f"updateTrigger succeeded | trigger_id={trigger_id_int}",
     )
@@ -222,17 +233,17 @@ def _update_trigger_tool(
 
 
 # List all triggers belonging to this execution agent
-def _list_triggers_tool(*, agent_name: str) -> dict[str, Any]:
+def _list_triggers_tool(*, agent_name: str) -> dict[str, object]:
     try:
         records = _TRIGGER_SERVICE.list_triggers(agent_name=agent_name)
     except Exception as exc:  # pragma: no cover - defensive
-        _LOG_STORE.record_action(
+        get_execution_agent_logs().record_action(
             agent_name,
             description=f"listTriggers failed | error={exc}",
         )
         return {"error": str(exc)}
 
-    _LOG_STORE.record_action(
+    get_execution_agent_logs().record_action(
         agent_name,
         description=f"listTriggers succeeded | count={len(records)}",
     )

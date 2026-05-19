@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from importlib import import_module
 from typing import Protocol, cast
 
+from ...core.sqlite_row import SqliteRow
 from .hybrid_search import SearchCandidate
 
 
@@ -60,13 +61,13 @@ class _MemorySearchResult(Protocol):
 
 class _MemoryStore(Protocol):
     def get_memories(
-        self, memory_ids: Iterable[str]
+        self, memory_ids: Iterable[str], *, workspace_id: str | None = None
     ) -> Mapping[str, _MemoryRecord]: ...
 
     def _connect(self) -> sqlite3.Connection: ...
 
     def _event_from_row(
-        self, conn: sqlite3.Connection, row: sqlite3.Row
+        self, conn: sqlite3.Connection, row: SqliteRow
     ) -> _MemoryEvent: ...
 
 
@@ -100,8 +101,11 @@ class _MemoryRecordFactory(Protocol):
 class PromptContextRanker:
     """Group event-level hits by memory for prompt context packing."""
 
-    def __init__(self, store: _MemoryStore) -> None:
+    def __init__(
+        self, store: _MemoryStore, *, workspace_id: str | None = None
+    ) -> None:
         self._store: _MemoryStore = store
+        self._workspace_id: str | None = workspace_id
 
     def rank(
         self,
@@ -124,14 +128,18 @@ class PromptContextRanker:
             self._store,
             sorted(grouped.values(), key=lambda item: item.sort_score, reverse=True),
             limit=limit,
+            workspace_id=self._workspace_id,
         )
 
 
 class SearchResultRanker:
     """Preserve event-level matches while returning memory-compatible results."""
 
-    def __init__(self, store: _MemoryStore) -> None:
+    def __init__(
+        self, store: _MemoryStore, *, workspace_id: str | None = None
+    ) -> None:
         self._store: _MemoryStore = store
+        self._workspace_id: str | None = workspace_id
 
     def rank(
         self,
@@ -139,7 +147,12 @@ class SearchResultRanker:
         *,
         limit: int,
     ) -> list[_MemorySearchResult]:
-        return _results_from_candidates(self._store, candidates, limit=limit)
+        return _results_from_candidates(
+            self._store,
+            candidates,
+            limit=limit,
+            workspace_id=self._workspace_id,
+        )
 
 
 def _results_from_candidates(
@@ -147,6 +160,7 @@ def _results_from_candidates(
     candidates: list[SearchCandidate],
     *,
     limit: int,
+    workspace_id: str | None = None,
 ) -> list[_MemorySearchResult]:
     MemorySearchResult = cast(
         _MemorySearchResultFactory,
@@ -161,7 +175,7 @@ def _results_from_candidates(
             candidate_memory_ids.append(candidate.memory_id)
         if len(candidate_memory_ids) >= max(limit * 3, limit):
             break
-    memories = store.get_memories(candidate_memory_ids)
+    memories = store.get_memories(candidate_memory_ids, workspace_id=workspace_id)
     for candidate in candidates:
         memory_id = candidate.memory_id
         if not memory_id or memory_id in seen_memory_ids:
@@ -170,7 +184,9 @@ def _results_from_candidates(
         if memory is None:
             continue
         if candidate.event_id:
-            memory = _memory_with_matched_event_first(store, memory, candidate.event_id)
+            memory = _memory_with_matched_event_first(
+                store, memory, candidate.event_id, workspace_id=workspace_id
+            )
         results.append(
             MemorySearchResult(
                 memory=memory,
@@ -189,6 +205,8 @@ def _memory_with_matched_event_first(
     store: _MemoryStore,
     memory: _MemoryRecord,
     event_id: str,
+    *,
+    workspace_id: str | None = None,
 ) -> _MemoryRecord:
     MemoryRecord = cast(
         _MemoryRecordFactory,
@@ -196,13 +214,22 @@ def _memory_with_matched_event_first(
     )
 
     with store._connect() as conn:  # pyright: ignore[reportPrivateUsage]
-        row = cast(
-            sqlite3.Row | None,
-            conn.execute(
-                "SELECT * FROM events WHERE event_id = ?",
-                (event_id,),
-            ).fetchone(),
-        )
+        if workspace_id is not None:
+            row = cast(
+                "SqliteRow | None",
+                conn.execute(
+                    "SELECT * FROM events WHERE workspace_id = ? AND event_id = ?",
+                    (workspace_id, event_id),
+                ).fetchone(),
+            )
+        else:
+            row = cast(
+                "SqliteRow | None",
+                conn.execute(
+                    "SELECT * FROM events WHERE event_id = ?",
+                    (event_id,),
+                ).fetchone(),
+            )
         if row is None:
             return memory
         event = store._event_from_row(  # pyright: ignore[reportPrivateUsage]

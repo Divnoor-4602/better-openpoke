@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 
 from ...config import Settings, get_settings
@@ -15,5 +17,7 @@ router = APIRouter(tags=["health"], responses=ERROR_RESPONSES)
     operation_id="retrieve_health",
     summary="Get API health",
 )
-def retrieve_health(settings: Settings = Depends(get_settings)) -> HealthResponse:
+def retrieve_health(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> HealthResponse:
     return HealthResponse(ok=True, service="openpoke", version=settings.app_version)

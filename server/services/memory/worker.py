@@ -6,10 +6,11 @@ import asyncio
 from pathlib import Path
 
 from ...config import get_settings
+from ...core.paths import get_data_dir
 from ...logging_config import logger
 from .indexer import MemoryIndexer, pinecone_enabled
 
-_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+_DATA_DIR = get_data_dir()
 _MEMORY_DB_PATH = _DATA_DIR / "memory.db"
 
 
@@ -74,7 +75,7 @@ class MemoryIndexWorker:
                 )
                 if synced:
                     stats = indexer.queue_stats()
-                    logger.info(
+                    logger.debug(
                         "Memory index worker synced records",
                         extra={
                             "worker": worker_index,

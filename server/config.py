@@ -57,26 +57,32 @@ class Settings(BaseModel):
 
     # Server runtime
     server_host: str = Field(default=os.getenv("OPENPOKE_HOST", "0.0.0.0"))
-    server_port: int = Field(default=_env_int("OPENPOKE_PORT", 8001))
+    # Railway/Heroku inject PORT; fall back to OPENPOKE_PORT for explicit overrides, then 8001.
+    server_port: int = Field(
+        default=_env_int("PORT", _env_int("OPENPOKE_PORT", 8001))
+    )
 
     # LLM model selection
     interaction_agent_model: str = Field(default="anthropic/claude-sonnet-4")
-    execution_agent_model: str = Field(default="anthropic/claude-sonnet-4")
-    execution_agent_search_model: str = Field(default="anthropic/claude-sonnet-4")
+    execution_agent_model: str = Field(default="anthropic/claude-haiku-4.5")
+    execution_agent_search_model: str = Field(default="anthropic/claude-haiku-4.5")
+    thread_title_model: str = Field(default="anthropic/claude-haiku-4.5")
     summarizer_model: str = Field(default="anthropic/claude-sonnet-4")
     email_classifier_model: str = Field(default="anthropic/claude-sonnet-4")
 
+    # Demo auth — single shared password gating all API access. Required.
+    demo_password: str = Field(default=os.getenv("DEMO_PASSWORD", ""))
+
     # Credentials / integrations
     openrouter_api_key: str | None = Field(default=os.getenv("OPENROUTER_API_KEY"))
-    composio_gmail_auth_config_id: str | None = Field(
-        default=os.getenv("COMPOSIO_GMAIL_AUTH_CONFIG_ID")
+    composio_google_auth_config_id: str | None = Field(
+        default=os.getenv("COMPOSIO_GOOGLE_AUTH_CONFIG_ID")
     )
     composio_api_key: str | None = Field(default=os.getenv("COMPOSIO_API_KEY"))
 
     # Derived memory search infrastructure. SQLite remains the source of truth.
     pinecone_api_key: str | None = Field(default=os.getenv("PINECONE_API_KEY"))
     pinecone_index_host: str | None = Field(default=os.getenv("PINECONE_INDEX_HOST"))
-    pinecone_namespace: str = Field(default=os.getenv("PINECONE_NAMESPACE", "openpoke"))
     memory_search_backend: str = Field(
         default=os.getenv("MEMORY_SEARCH_BACKEND", "pinecone_hybrid")
     )

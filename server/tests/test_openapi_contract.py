@@ -1,42 +1,74 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import cast
 
 from server.app import app
 
 EXPECTED_OPERATION_IDS = {
-    ("get", "/api/health"): "retrieve_health",
-    ("get", "/api/threads"): "list_threads",
-    ("post", "/api/threads"): "create_thread",
-    ("get", "/api/threads/{threadId}"): "retrieve_thread",
-    ("patch", "/api/threads/{threadId}"): "update_thread",
+    ("delete", "/api/calendar/events/{event_id}"): "discard_calendar_event",
+    ("delete", "/api/gmail/drafts/{draft_id}"): "discard_gmail_draft",
     ("delete", "/api/threads/{threadId}"): "delete_thread",
-    ("get", "/api/threads/{threadId}/messages"): "list_thread_messages",
-    ("post", "/api/threads/{threadId}/messages"): "create_thread_message",
-    ("post", "/api/threads/{threadId}/messages/stream"): "stream_thread_message",
-    ("get", "/api/threads/{threadId}/agent-runs"): "list_thread_agent_runs",
-    ("post", "/api/threads/{threadId}/agent-runs"): "create_thread_agent_run",
+    ("get", "/api/admin/workspaces"): "list_workspaces",
     ("get", "/api/agent-runs"): "list_agent_runs",
     ("get", "/api/agent-runs/{requestId}"): "retrieve_agent_run",
     ("get", "/api/agent-runs/{requestId}/stream"): "stream_agent_run_events",
+    ("get", "/api/health"): "retrieve_health",
+    ("get", "/api/me"): "retrieve_me",
+    ("get", "/api/meta/timezone"): "retrieve_timezone",
+    ("get", "/api/reminders/events"): "stream_reminder_events",
+    ("get", "/api/threads"): "list_threads",
+    ("get", "/api/threads/{threadId}"): "retrieve_thread",
+    ("get", "/api/threads/{threadId}/agent-runs"): "list_thread_agent_runs",
+    ("get", "/api/threads/{threadId}/messages"): "list_thread_messages",
+    ("patch", "/api/calendar/events/{event_id}"): "update_calendar_event",
+    ("patch", "/api/gmail/drafts/{draft_id}"): "update_gmail_draft",
+    ("patch", "/api/threads/{threadId}"): "update_thread",
+    ("post", "/api/dev/reset"): "dev_reset",
+    ("post", "/api/gmail/drafts/{draft_id}/send"): "send_gmail_draft",
     ("post", "/api/integrations/{provider}/connect"): "connect_integration",
-    ("post", "/api/integrations/{provider}/status"): "retrieve_integration_status",
     ("post", "/api/integrations/{provider}/disconnect"): "disconnect_integration",
+    ("post", "/api/integrations/{provider}/status"): "retrieve_integration_status",
+    ("post", "/api/meta/timezone"): "set_timezone",
+    ("post", "/api/threads"): "create_thread",
+    ("post", "/api/threads/{threadId}/agent-runs"): "create_thread_agent_run",
+    ("post", "/api/threads/{threadId}/messages"): "create_thread_message",
+    ("post", "/api/threads/{threadId}/messages/stream"): "stream_thread_message",
+    ("post", "/api/threads/{threadId}/title"): "generate_thread_title",
 }
 
 
-def _operations(schema: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
-    operations: list[tuple[str, str, dict[str, Any]]] = []
-    for path, path_item in schema["paths"].items():
-        for method, operation in path_item.items():
+def _schema() -> Mapping[str, object]:
+    """Type the OpenAPI schema as a structural mapping.
+
+    `FastAPI.openapi()` is typed as returning `dict[str, Any]` in the framework
+    typeshed; we cast once at the boundary so each test reads typed values.
+    """
+    return cast(Mapping[str, object], cast(object, app.openapi()))
+
+
+def _as_mapping(value: object) -> Mapping[str, object]:
+    """Narrow `object` to a typed mapping (asserts at runtime)."""
+    assert isinstance(value, Mapping), value
+    return cast(Mapping[str, object], value)
+
+
+def _operations(
+    schema: Mapping[str, object],
+) -> list[tuple[str, str, Mapping[str, object]]]:
+    operations: list[tuple[str, str, Mapping[str, object]]] = []
+    paths = _as_mapping(schema["paths"])
+    for path, path_item in paths.items():
+        item = _as_mapping(path_item)
+        for method, operation in item.items():
             if method.lower() in {"get", "post", "patch", "delete", "put"}:
-                operations.append((path, method, operation))
+                operations.append((path, method, _as_mapping(operation)))
     return operations
 
 
 def test_schema_exposes_only_unversioned_api_paths() -> None:
-    schema = app.openapi()
-    paths = set(schema["paths"])
+    schema = _schema()
+    paths = set(_as_mapping(schema["paths"]))
 
     assert paths
     assert all(path.startswith("/api/") for path in paths)
@@ -46,18 +78,19 @@ def test_schema_exposes_only_unversioned_api_paths() -> None:
 
 
 def test_every_public_operation_has_stable_operation_id() -> None:
-    schema = app.openapi()
-    operation_ids = [
+    schema = _schema()
+    raw_operation_ids: list[object] = [
         operation.get("operationId") for _, _, operation in _operations(schema)
     ]
 
-    assert all(isinstance(operation_id, str) and operation_id for operation_id in operation_ids)
+    assert all(isinstance(operation_id, str) and operation_id for operation_id in raw_operation_ids)
+    operation_ids: list[str] = [op for op in raw_operation_ids if isinstance(op, str)]
     assert len(operation_ids) == len(set(operation_ids))
     assert all(" " not in operation_id for operation_id in operation_ids)
 
 
 def test_public_operation_ids_match_sdk_contract() -> None:
-    schema = app.openapi()
+    schema = _schema()
     actual = {
         (method, path): operation.get("operationId")
         for path, method, operation in _operations(schema)
@@ -67,62 +100,77 @@ def test_public_operation_ids_match_sdk_contract() -> None:
 
 
 def test_request_and_response_bodies_use_explicit_schemas() -> None:
-    schema = app.openapi()
+    schema = _schema()
     for path, method, operation in _operations(schema):
         request_body = operation.get("requestBody")
-        if isinstance(request_body, dict):
-            content = request_body.get("content", {})
+        if isinstance(request_body, Mapping):
+            request_body_map = cast(Mapping[str, object], request_body)
+            content = _as_mapping(request_body_map.get("content") or {})
             for media in content.values():
-                schema_obj = media.get("schema", {})
+                schema_obj = _as_mapping(_as_mapping(media).get("schema") or {})
                 assert "$ref" in schema_obj, (method, path, schema_obj)
 
-        responses = operation.get("responses", {})
-        success = responses.get("200") or responses.get("201") or responses.get("202")
-        assert isinstance(success, dict), (method, path)
-        content = success.get("content", {})
+        responses = _as_mapping(operation.get("responses") or {})
+        success_value = (
+            responses.get("200") or responses.get("201") or responses.get("202")
+        )
+        assert isinstance(success_value, Mapping), (method, path)
+        success = cast(Mapping[str, object], success_value)
+        content = _as_mapping(success.get("content") or {})
         if "text/event-stream" in content:
-            assert content["text/event-stream"]["schema"]["type"] == "string"
+            stream_schema = _as_mapping(
+                _as_mapping(content["text/event-stream"])["schema"]
+            )
+            assert stream_schema["type"] == "string"
             continue
-        json_schema = content.get("application/json", {}).get("schema", {})
+        json_media = _as_mapping(content.get("application/json") or {})
+        json_schema = _as_mapping(json_media.get("schema") or {})
         assert "$ref" in json_schema, (method, path, json_schema)
 
 
 def test_standard_error_response_is_documented_everywhere() -> None:
-    schema = app.openapi()
-    error_schema = schema["components"]["schemas"]["ErrorResponse"]
-    assert set(["ok", "error", "requestId"]).issubset(error_schema["properties"])
+    schema = _schema()
+    components = _as_mapping(schema["components"])
+    schemas = _as_mapping(components["schemas"])
+    error_schema = _as_mapping(schemas["ErrorResponse"])
+    properties = _as_mapping(error_schema["properties"])
+    assert {"ok", "error", "requestId"}.issubset(properties)
 
     for path, method, operation in _operations(schema):
-        responses = operation.get("responses", {})
+        responses = _as_mapping(operation.get("responses") or {})
         for status_code in ("400", "404", "422", "500"):
-            content = responses[status_code]["content"]
+            content = _as_mapping(_as_mapping(responses[status_code])["content"])
+            json_schema = _as_mapping(_as_mapping(content["application/json"])["schema"])
             assert (
-                content["application/json"]["schema"]["$ref"]
-                == "#/components/schemas/ErrorResponse"
+                json_schema["$ref"] == "#/components/schemas/ErrorResponse"
             ), (method, path, status_code)
 
 
 def test_stream_routes_are_documented_as_event_streams() -> None:
-    schema = app.openapi()
-    stream_paths = {
-        path
-        for path in schema["paths"]
-        if path.endswith("/stream")
-    }
+    schema = _schema()
+    paths = _as_mapping(schema["paths"])
+    stream_paths = {path for path in paths if path.endswith("/stream")}
     assert stream_paths == {
         "/api/agent-runs/{requestId}/stream",
         "/api/threads/{threadId}/messages/stream",
     }
 
     for path in stream_paths:
-        operation = next(iter(schema["paths"][path].values()))
-        assert "text/event-stream" in operation["responses"]["200"]["content"]
+        path_item = _as_mapping(paths[path])
+        operation = _as_mapping(next(iter(path_item.values())))
+        responses = _as_mapping(operation["responses"])
+        success = _as_mapping(responses["200"])
+        content = _as_mapping(success["content"])
+        assert "text/event-stream" in content
 
 
 def test_cursor_pagination_schema_is_consistent() -> None:
-    schema = app.openapi()
-    cursor_page = schema["components"]["schemas"]["CursorPage"]
-    assert set(["nextCursor", "limit"]).issubset(cursor_page["properties"])
+    schema = _schema()
+    components = _as_mapping(schema["components"])
+    schemas = _as_mapping(components["schemas"])
+    cursor_page = _as_mapping(schemas["CursorPage"])
+    properties = _as_mapping(cursor_page["properties"])
+    assert {"nextCursor", "limit"}.issubset(properties)
 
     paginated_refs = {
         "#/components/schemas/ThreadListResponse",
@@ -131,9 +179,15 @@ def test_cursor_pagination_schema_is_consistent() -> None:
     }
     discovered_refs: set[str] = set()
     for _, _, operation in _operations(schema):
-        for response in operation.get("responses", {}).values():
-            content = response.get("content", {}) if isinstance(response, dict) else {}
-            ref = content.get("application/json", {}).get("schema", {}).get("$ref")
-            if ref in paginated_refs:
+        responses = _as_mapping(operation.get("responses") or {})
+        for response in responses.values():
+            if not isinstance(response, Mapping):
+                continue
+            response_map = cast(Mapping[str, object], response)
+            content = _as_mapping(response_map.get("content") or {})
+            json_media = _as_mapping(content.get("application/json") or {})
+            json_schema = _as_mapping(json_media.get("schema") or {})
+            ref = json_schema.get("$ref")
+            if isinstance(ref, str) and ref in paginated_refs:
                 discovered_refs.add(ref)
     assert discovered_refs == paginated_refs

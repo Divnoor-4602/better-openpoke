@@ -11,9 +11,11 @@ from fastapi import status
 from fastapi.responses import JSONResponse
 
 from ...config import Settings, get_settings
+from ...core.workspace_context import get_current_workspace
 from ...logging_config import logger
-from ...models import GmailConnectPayload, GmailDisconnectPayload, GmailStatusPayload
-from ...utils import error_response  # pyright: ignore[reportAny]
+from ...models import GoogleConnectPayload, GoogleDisconnectPayload, GoogleStatusPayload
+from ...utils import error_response
+from .connections import list_workspaces_with_gmail
 
 JsonDict: TypeAlias = dict[str, object]
 
@@ -22,24 +24,39 @@ _client: object | None = None
 
 _PROFILE_CACHE: dict[str, JsonDict] = {}
 _PROFILE_CACHE_LOCK = threading.Lock()
-_ACTIVE_USER_ID_LOCK = threading.Lock()
-_active_user_id: str | None = None
 
 
 def _normalized(value: object) -> str:
     return str(value or "").strip()
 
 
-def _set_active_gmail_user_id(user_id: object) -> None:
-    sanitized = _normalized(user_id)
-    with _ACTIVE_USER_ID_LOCK:
-        global _active_user_id
-        _active_user_id = sanitized or None
+def resolve_workspace_gmail_user_id() -> str | None:
+    """Return the Composio user_id for the current workspace, or None.
+
+    The Composio `user_id` is the workspace handle by API design — the
+    integrations route forces `payload.user_id = workspace_id` on every
+    connect/status/disconnect call. So "what user_id do I send to
+    Composio?" reduces to "what workspace is bound to this context, and
+    is it actually connected to Gmail?".
+
+    Returns None when either (a) no workspace is bound (callers in this
+    state should surface a "Gmail not connected" message rather than
+    crash) or (b) the workspace has no entry in the gmail registry yet.
+    """
+    workspace_id = get_current_workspace()
+    if not workspace_id:
+        return None
+    if workspace_id not in set(list_workspaces_with_gmail()):
+        return None
+    return workspace_id
 
 
-def get_active_gmail_user_id() -> str | None:
-    with _ACTIVE_USER_ID_LOCK:
-        return _active_user_id
+def _default_google_user_id() -> str:
+    return (
+        os.getenv("OPENPOKE_GOOGLE_USER_ID")
+        or os.getenv("COMPOSIO_GOOGLE_USER_ID")
+        or "openpoke-web"
+    )
 
 
 def _gmail_import_client() -> Callable[..., object]:
@@ -163,11 +180,11 @@ def _fetch_profile_from_composio(user_id: object) -> JsonDict | None:
     if not sanitized:
         return None
     try:
-        result = execute_gmail_tool(
-            "GMAIL_GET_PROFILE", sanitized, arguments={"user_id": "me"}
+        result = execute_google_tool(
+            "GOOGLESUPER_GET_PROFILE", sanitized, arguments={"user_id": "me"}
         )
     except RuntimeError as exc:
-        logger.warning("GMAIL_GET_PROFILE invocation failed: %s", exc)
+        logger.warning("GOOGLESUPER_GET_PROFILE invocation failed: %s", exc)
         return None
     except Exception:  # pragma: no cover - defensive
         logger.exception(
@@ -218,28 +235,50 @@ def _fetch_profile_from_composio(user_id: object) -> JsonDict | None:
     return None
 
 
-def initiate_connect(payload: GmailConnectPayload, settings: Settings) -> JSONResponse:
-    auth_config_id = (
-        payload.auth_config_id or settings.composio_gmail_auth_config_id or ""
-    )
+def initiate_connect(payload: GoogleConnectPayload, settings: Settings) -> JSONResponse:
+    auth_config_id = payload.auth_config_id or ""
     if not auth_config_id:
         return _error_response(
-            "Missing auth_config_id. Set COMPOSIO_GMAIL_AUTH_CONFIG_ID or pass auth_config_id.",
+            "Missing auth_config_id. Set COMPOSIO_GOOGLE_AUTH_CONFIG_ID or pass auth_config_id.",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
-    user_id = payload.user_id or f"web-{os.getpid()}"
-    _set_active_gmail_user_id(user_id)
+    user_id = payload.user_id or _default_google_user_id()
     _clear_cached_profile(user_id)
     try:
         client = _get_composio_client(settings)
         connected_accounts = _attr(client, "connected_accounts")
+        list_connections = _attr(connected_accounts, "list")
+        if callable(list_connections):
+            existing = list_connections(
+                auth_config_ids=[auth_config_id],
+                statuses=["ACTIVE"],
+                user_ids=[user_id],
+            )
+            existing_items = _list_response_items(existing)
+            if existing_items:
+                return JSONResponse(
+                    {
+                        "ok": True,
+                        "redirect_url": None,
+                        "connection_request_id": None,
+                        "user_id": user_id,
+                    }
+                )
+
         link = _attr(connected_accounts, "link")
         if not callable(link):
             raise RuntimeError(
                 "Installed Composio SDK does not expose connected_accounts.link; upgrade the SDK to connect Gmail."
             )
-        req = link(user_id=user_id, auth_config_id=auth_config_id)
+        link_kwargs = {
+            "auth_config_id": auth_config_id,
+            "user_id": user_id,
+        }
+        if payload.return_to:
+            link_kwargs["callback_url"] = payload.return_to
+
+        req = link(**link_kwargs)
         return JSONResponse(
             {
                 "ok": True,
@@ -257,14 +296,21 @@ def initiate_connect(payload: GmailConnectPayload, settings: Settings) -> JSONRe
         )
 
 
-def fetch_status(payload: GmailStatusPayload) -> JSONResponse:
+def fetch_status(payload: GoogleStatusPayload) -> JSONResponse:
     connection_request_id = _normalized(payload.connection_request_id)
-    user_id = _normalized(payload.user_id)
+    user_id = _normalized(payload.user_id) or _default_google_user_id()
 
     if not connection_request_id and not user_id:
-        return _error_response(
-            "Missing connection_request_id or user_id",
-            status_code=status.HTTP_400_BAD_REQUEST,
+        return JSONResponse(
+            {
+                "ok": True,
+                "connected": False,
+                "status": "DISCONNECTED",
+                "email": None,
+                "user_id": None,
+                "profile": None,
+                "profile_source": "none",
+            }
         )
 
     try:
@@ -291,16 +337,49 @@ def fetch_status(payload: GmailStatusPayload) -> JSONResponse:
                 list_connections = cast(
                     Callable[..., object], _attr(connected_accounts, "list")
                 )
+                # Try filtered list first (Gmail or GOOGLESUPER, ACTIVE)
                 items = list_connections(
-                    user_ids=[user_id], toolkit_slugs=["GMAIL"], statuses=["ACTIVE"]
+                    user_ids=[user_id],
+                    toolkit_slugs=["GMAIL", "GOOGLESUPER"],
+                    statuses=["ACTIVE"],
                 )
-                data = _attr(items, "data")
-                items_map = _as_mapping(items)
-                if data is None and items_map is not None:
-                    data = items_map.get("data")
-                if isinstance(data, list) and data:
-                    account = cast(list[object], data)[0]
+                data = _list_response_items(items)
+                if data:
+                    account = data[0]
+                else:
+                    # Fall back to unfiltered list — Composio may use a different
+                    # toolkit slug for the connection or report a non-ACTIVE status.
+                    items = list_connections(user_ids=[user_id])
+                    data = _list_response_items(items)
+                    if data:
+                        # Prefer an account that looks active.
+                        for candidate in data:
+                            mapping = _as_mapping(candidate)
+                            cand_status = str(
+                                _attr(candidate, "status")
+                                or (mapping.get("status") if mapping is not None else "")
+                                or ""
+                            ).upper()
+                            if cand_status in {
+                                "CONNECTED",
+                                "ACTIVE",
+                                "SUCCESS",
+                                "SUCCESSFUL",
+                                "COMPLETED",
+                            }:
+                                account = candidate
+                                break
+                        if account is None:
+                            account = data[0]
+                        logger.info(
+                            "gmail status fallback list_connections matched",
+                            extra={"user_id": user_id, "count": len(data)},
+                        )
             except Exception:
+                logger.exception(
+                    "gmail status list_connections failed",
+                    extra={"user_id": user_id},
+                )
                 account = None
 
         status_value: object = None
@@ -346,8 +425,6 @@ def fetch_status(payload: GmailStatusPayload) -> JSONResponse:
         elif user_id:
             _clear_cached_profile(user_id)
 
-        _set_active_gmail_user_id(user_id)
-
         return JSONResponse(
             {
                 "ok": True,
@@ -374,11 +451,11 @@ def fetch_status(payload: GmailStatusPayload) -> JSONResponse:
         )
 
 
-def disconnect_account(payload: GmailDisconnectPayload) -> JSONResponse:
+def disconnect_account(payload: GoogleDisconnectPayload) -> JSONResponse:
     connection_id = _normalized(payload.connection_id) or _normalized(
         payload.connection_request_id
     )
-    user_id = _normalized(payload.user_id)
+    user_id = _normalized(payload.user_id) or _default_google_user_id()
 
     if not connection_id and not user_id:
         return _error_response(
@@ -446,11 +523,10 @@ def disconnect_account(payload: GmailDisconnectPayload) -> JSONResponse:
             list_connections = cast(
                 Callable[..., object], _attr(connected_accounts, "list")
             )
-            items = list_connections(user_ids=[user_id], toolkit_slugs=["GMAIL"])
-            data = _attr(items, "data")
-            items_map = _as_mapping(items)
-            if data is None and items_map is not None:
-                data = items_map.get("data")
+            items = list_connections(
+                user_ids=[user_id], toolkit_slugs=["GMAIL", "GOOGLESUPER"]
+            )
+            data = _list_response_items(items)
         except Exception as exc:  # pragma: no cover - dependent on SDK
             logger.exception(
                 "Failed to list Gmail connections", extra={"user_id": user_id}
@@ -461,8 +537,8 @@ def disconnect_account(payload: GmailDisconnectPayload) -> JSONResponse:
                 detail=str(exc),
             )
 
-        if isinstance(data, list) and data:
-            for entry in cast(list[object], data):
+        if data:
+            for entry in data:
                 entry_map = _as_mapping(entry)
                 candidate = _attr(entry, "id") or (
                     entry_map.get("id") if entry_map is not None else None
@@ -481,8 +557,6 @@ def disconnect_account(payload: GmailDisconnectPayload) -> JSONResponse:
     for uid in list(affected_user_ids):
         if uid:
             _clear_cached_profile(uid)
-            if get_active_gmail_user_id() == uid:
-                _set_active_gmail_user_id(None)
 
     if errors and not removed_ids:
         return _error_response(
@@ -538,7 +612,7 @@ def _normalize_tool_response(result: object) -> JsonDict:
     return payload_dict
 
 
-def execute_gmail_tool(
+def execute_google_tool(
     tool_name: str,
     composio_user_id: str,
     *,
@@ -575,6 +649,14 @@ def _attr(obj: object, name: str) -> object | None:
     return getattr(obj, name, None)
 
 
+def _list_response_items(value: object) -> list[object]:
+    items = _attr(value, "items") or _attr(value, "data")
+    value_map = _as_mapping(value)
+    if items is None and value_map is not None:
+        items = value_map.get("items") or value_map.get("data")
+    return cast(list[object], items) if isinstance(items, list) else []
+
+
 def _as_mapping(value: object) -> Mapping[str, object] | None:
     if not isinstance(value, Mapping):
         return None
@@ -591,7 +673,4 @@ def _as_dict(value: object) -> JsonDict | None:
 def _error_response(
     message: str, *, status_code: int, detail: str | None = None
 ) -> JSONResponse:
-    return cast(
-        JSONResponse,
-        error_response(message, status_code=status_code, detail=detail),
-    )
+    return error_response(message, status_code=status_code, detail=detail)

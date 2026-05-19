@@ -167,7 +167,7 @@ def _coerce_arguments(raw: object) -> dict[str, object] | None:
         if not raw.strip():
             return {}
         try:
-            parsed = json.loads(raw)
+            parsed = cast(object, json.loads(raw))
         except json.JSONDecodeError:
             return None
         if not isinstance(parsed, dict):

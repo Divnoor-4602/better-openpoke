@@ -44,7 +44,7 @@ def rerank_candidates(
             return_documents=True,
             parameters={"truncate": "END"},
         )
-        logger.info(
+        logger.debug(
             "Pinecone memory rerank completed",
             extra={
                 "candidates": len(candidates),

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class ThreadEntity:
     thread_id: str
-    title: str
+    title: str | None
     created_at: str
     updated_at: str
 
@@ -19,3 +19,4 @@ class MessageEntity:
     content: str
     parts_json: str | None
     created_at: str
+    turn_index: int = 0

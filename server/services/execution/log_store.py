@@ -8,10 +8,12 @@ from collections.abc import Iterator
 from html import escape, unescape
 from pathlib import Path
 
+from ...core.paths import get_data_dir
+from ...core.workspace_context import require_current_workspace
 from ...logging_config import logger
 from ...utils.timezones import now_in_user_timezone
 
-_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+_DATA_DIR = get_data_dir()
 _EXECUTION_LOG_DIR = _DATA_DIR / "execution_agents"
 
 
@@ -44,9 +46,9 @@ class ExecutionAgentLogStore:
     """Append-only journal for execution agents with XML-style tags."""
 
     def __init__(self, base_dir: Path):
-        self._base_dir = base_dir
+        self._base_dir: Path = base_dir
         self._locks: dict[str, threading.Lock] = {}
-        self._global_lock = threading.Lock()
+        self._global_lock: threading.Lock = threading.Lock()
         self._ensure_directory()
 
     def _ensure_directory(self) -> None:
@@ -76,7 +78,7 @@ class ExecutionAgentLogStore:
         with self._lock_for(agent_name):
             try:
                 with self._log_path(agent_name).open("a", encoding="utf-8") as handle:
-                    handle.write(entry)
+                    _ = handle.write(entry)
             except Exception as exc:
                 logger.error(f"Failed to append to log: {exc}")
 
@@ -182,9 +184,31 @@ class ExecutionAgentLogStore:
             logger.error(f"Failed to clear execution logs: {exc}")
 
 
-_execution_agent_logs = ExecutionAgentLogStore(_EXECUTION_LOG_DIR)
+_cache: dict[str, ExecutionAgentLogStore] = {}
+_cache_lock = threading.Lock()
 
 
-def get_execution_agent_logs() -> ExecutionAgentLogStore:
-    """Get the singleton log store instance."""
-    return _execution_agent_logs
+def _resolve_workspace(workspace_id: str | None) -> str:
+    return workspace_id or require_current_workspace()
+
+
+def get_execution_agent_logs(
+    workspace_id: str | None = None,
+) -> ExecutionAgentLogStore:
+    """Return the per-workspace log store, creating it lazily."""
+    workspace_id = _resolve_workspace(workspace_id)
+    cached = _cache.get(workspace_id)
+    if cached is not None:
+        return cached
+    with _cache_lock:
+        cached = _cache.get(workspace_id)
+        if cached is None:
+            cached = ExecutionAgentLogStore(_EXECUTION_LOG_DIR / workspace_id)
+            _cache[workspace_id] = cached
+        return cached
+
+
+def reset_execution_logs_cache() -> None:
+    """Test helper: drop the per-workspace cache."""
+    with _cache_lock:
+        _cache.clear()

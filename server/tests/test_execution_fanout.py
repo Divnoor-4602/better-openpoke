@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import cast
+from typing import cast, override
 from unittest.mock import AsyncMock, patch
 
 from server.agents.execution_agent.batch_manager import ExecutionBatchManager
@@ -78,6 +78,7 @@ class _FakeExecutionEventStore:
         )
 
     def list_runs(self, *, limit: int = 100) -> list[object]:
+        _ = limit
         return []
 
 
@@ -91,17 +92,19 @@ class FanoutToolTests(unittest.IsolatedAsyncioTestCase):
     fake_manager: _FakeBatchManager = cast(_FakeBatchManager, cast(object, None))
     _previous_manager: object = None
 
+    @override
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
         self.store = MemoryStore(Path(self.tmpdir.name) / "memory.db")
         self.fake_logs = _FakeExecutionLogs()
         self.fake_events = _FakeExecutionEventStore()
         self.fake_manager = _FakeBatchManager()
-        self._previous_manager = interaction_tools._execution_batch_manager
-        interaction_tools._execution_batch_manager = self.fake_manager
+        self._previous_manager = interaction_tools._execution_batch_manager  # pyright: ignore[reportPrivateUsage]
+        interaction_tools._execution_batch_manager = self.fake_manager  # pyright: ignore[reportPrivateUsage]
 
+    @override
     def tearDown(self) -> None:
-        interaction_tools._execution_batch_manager = self._previous_manager
+        interaction_tools._execution_batch_manager = self._previous_manager  # pyright: ignore[reportPrivateUsage]
         self.tmpdir.cleanup()
 
     async def test_fanout_creates_child_memories_and_submits_each(self) -> None:
@@ -115,7 +118,7 @@ class FanoutToolTests(unittest.IsolatedAsyncioTestCase):
             return_value=self.fake_events,
         ), patch.object(
             interaction_tools,
-            "get_active_gmail_user_id",
+            "resolve_workspace_gmail_user_id",
             return_value="gmail-user",
         ):
             result = interaction_tools.send_messages_to_agents(
@@ -148,13 +151,17 @@ class FanoutToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(parent)
         assert parent is not None
 
-        children = payload["children"]
-        assert isinstance(children, list)
-        child_ids = [
-            child["memory_id"]
-            for child in children
-            if isinstance(child, dict) and isinstance(child.get("memory_id"), str)
-        ]
+        children_value = payload["children"]
+        assert isinstance(children_value, list)
+        children = cast(list[object], children_value)
+        child_ids: list[str] = []
+        for child in children:
+            if not isinstance(child, dict):
+                continue
+            child_map = cast(dict[str, object], child)
+            memory_id_value = child_map.get("memory_id")
+            if isinstance(memory_id_value, str):
+                child_ids.append(memory_id_value)
         self.assertEqual(
             sorted(link.value for link in parent.links if link.kind == "child_memory"),
             sorted(child_ids),
@@ -190,7 +197,7 @@ class FanoutToolTests(unittest.IsolatedAsyncioTestCase):
             return_value=self.fake_events,
         ), patch.object(
             interaction_tools,
-            "get_active_gmail_user_id",
+            "resolve_workspace_gmail_user_id",
             return_value="gmail-user",
         ):
             result = interaction_tools.send_message_to_agent(
@@ -212,62 +219,66 @@ class FanoutToolTests(unittest.IsolatedAsyncioTestCase):
 class ExecutionBatchManagerTests(unittest.IsolatedAsyncioTestCase):
     async def test_completion_dispatches_without_waiting_for_all_pending(self) -> None:
         manager = ExecutionBatchManager()
-        manager._dispatch_to_interaction_agent = AsyncMock()
+        manager._dispatch_to_interaction_agent = AsyncMock()  # pyright: ignore[reportPrivateUsage]
 
-        batch_id = await manager._register_pending_execution("mem-a", "A", "one", "req-a")
-        await manager._register_pending_execution("mem-b", "B", "two", "req-b")
-        await manager._register_pending_execution("mem-c", "C", "three", "req-c")
+        batch_id = await manager._register_pending_execution("mem-a", "A", "one", "req-a")  # pyright: ignore[reportPrivateUsage]
+        _ = await manager._register_pending_execution("mem-b", "B", "two", "req-b")  # pyright: ignore[reportPrivateUsage]
+        _ = await manager._register_pending_execution("mem-c", "C", "three", "req-c")  # pyright: ignore[reportPrivateUsage]
 
-        await manager._complete_execution(
+        await manager._complete_execution(  # pyright: ignore[reportPrivateUsage]
             batch_id,
             ExecutionResult("mem-a", "A", "mem-a", True, "sent", request_id="req-a"),
             "mem-a",
         )
-        await manager._complete_execution(
+        await manager._complete_execution(  # pyright: ignore[reportPrivateUsage]
             batch_id,
             ExecutionResult("mem-b", "B", "mem-b", True, "sent", request_id="req-b"),
             "mem-b",
         )
 
-        self.assertEqual(manager._dispatch_to_interaction_agent.await_count, 2)
-        self.assertIsNotNone(manager._batch_state)
-        assert manager._batch_state is not None
-        self.assertEqual(manager._batch_state.pending, 1)
+        self.assertEqual(manager._dispatch_to_interaction_agent.await_count, 2)  # pyright: ignore[reportPrivateUsage]
+        self.assertIsNotNone(manager._batch_state)  # pyright: ignore[reportPrivateUsage]
+        assert manager._batch_state is not None  # pyright: ignore[reportPrivateUsage]
+        self.assertEqual(manager._batch_state.pending, 1)  # pyright: ignore[reportPrivateUsage]
 
     async def test_completion_can_skip_user_dispatch_for_panel_only_visibility(self) -> None:
         manager = ExecutionBatchManager()
-        manager._dispatch_to_interaction_agent = AsyncMock()
+        manager._dispatch_to_interaction_agent = AsyncMock()  # pyright: ignore[reportPrivateUsage]
         recorded_statuses: list[str] = []
 
-        batch_id = await manager._register_pending_execution(
+        batch_id = await manager._register_pending_execution(  # pyright: ignore[reportPrivateUsage]
             "mem-a", "A", "one", "req-a", notify_user=False
         )
+
+        def _record_agent_message(_self: object, content: str) -> None:
+            recorded_statuses.append(content)
+
         with patch(
             "server.services.conversation.get_conversation_log",
             return_value=type(
                 "FakeConversationLog",
                 (),
-                {"record_agent_message": lambda _, content: recorded_statuses.append(content)},
+                {"record_agent_message": _record_agent_message},
             )(),
         ):
-            await manager._complete_execution(
+            await manager._complete_execution(  # pyright: ignore[reportPrivateUsage]
                 batch_id,
                 ExecutionResult("mem-a", "A", "mem-a", True, "sent", request_id="req-a"),
                 "mem-a",
                 notify_user=False,
             )
 
-        manager._dispatch_to_interaction_agent.assert_not_awaited()
+        manager._dispatch_to_interaction_agent.assert_not_awaited()  # pyright: ignore[reportPrivateUsage]
         self.assertEqual(len(recorded_statuses), 1)
         self.assertIn("[SUCCESS] mem-a / A: sent", recorded_statuses[0])
 
     async def test_failure_and_success_results_dispatch_independently(self) -> None:
         manager = ExecutionBatchManager()
-        manager._dispatch_to_interaction_agent = AsyncMock()
+        manager._dispatch_to_interaction_agent = AsyncMock()  # pyright: ignore[reportPrivateUsage]
 
-        batch_id = await manager._register_pending_execution("mem-a", "A", "one", "req-a")
-        await manager._register_pending_execution("mem-b", "B", "two", "req-b")
-        await manager._register_pending_execution("mem-c", "C", "three", "req-c")
+        batch_id = await manager._register_pending_execution("mem-a", "A", "one", "req-a")  # pyright: ignore[reportPrivateUsage]
+        _ = await manager._register_pending_execution("mem-b", "B", "two", "req-b")  # pyright: ignore[reportPrivateUsage]
+        _ = await manager._register_pending_execution("mem-c", "C", "three", "req-c")  # pyright: ignore[reportPrivateUsage]
 
         results = [
             ExecutionResult("mem-a", "A", "mem-a", True, "sent", request_id="req-a"),
@@ -275,18 +286,18 @@ class ExecutionBatchManagerTests(unittest.IsolatedAsyncioTestCase):
             ExecutionResult("mem-c", "C", "mem-c", True, "sent", request_id="req-c"),
         ]
         for result in results:
-            await manager._complete_execution(batch_id, result, result.memory_id)
+            await manager._complete_execution(batch_id, result, result.memory_id)  # pyright: ignore[reportPrivateUsage]
 
-        self.assertEqual(manager._dispatch_to_interaction_agent.await_count, 3)
-        payloads = [
-            call.args[0]
-            for call in manager._dispatch_to_interaction_agent.await_args_list
+        self.assertEqual(manager._dispatch_to_interaction_agent.await_count, 3)  # pyright: ignore[reportPrivateUsage]
+        payloads: list[str] = [
+            cast(str, call.args[0])
+            for call in manager._dispatch_to_interaction_agent.await_args_list  # pyright: ignore[reportPrivateUsage]
         ]
         self.assertIn("[FAILED] mem-b / B: failed", payloads[1])
         self.assertIn("request_id: req-b", payloads[1])
         self.assertIn("error: boom", payloads[1])
-        self.assertIsNone(manager._batch_state)
+        self.assertIsNone(manager._batch_state)  # pyright: ignore[reportPrivateUsage]
 
 
 if __name__ == "__main__":
-    unittest.main()
+    _ = unittest.main()

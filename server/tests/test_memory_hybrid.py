@@ -3,13 +3,25 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any, cast, override
 from unittest.mock import patch
 
 from server.services.memory.gmail import record_gmail_tool_result
 from server.services.memory.hybrid_search import exact_link_candidates
 from server.services.memory.indexer import MemoryIndexer, serialize_event, serialize_memory
 from server.services.memory.store import MemoryLink, MemoryStore
+
+
+def _rows(values: Any) -> list[Mapping[str, object]]:  # pyright: ignore[reportExplicitAny, reportAny]
+    return cast("list[Mapping[str, object]]", cast(object, values))
+
+
+def _row(value: Any) -> Mapping[str, object] | None:  # pyright: ignore[reportExplicitAny, reportAny]
+    if value is None:
+        return None
+    return cast(Mapping[str, object], cast(object, value))
 
 
 class MemoryHybridTests(unittest.TestCase):
@@ -27,11 +39,13 @@ class MemoryHybridTests(unittest.TestCase):
         assert self._store is not None
         return self._store
 
+    @override
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
         self._db_path = Path(self.tmpdir.name) / "memory.db"
         self._store = MemoryStore(self._db_path)
 
+    @override
     def tearDown(self) -> None:
         assert self.tmpdir is not None
         self.tmpdir.cleanup()
@@ -43,7 +57,7 @@ class MemoryHybridTests(unittest.TestCase):
             summary="Follow up with Pat",
             links=[MemoryLink(kind="gmail_thread", value="thread-12345678")],
         )
-        self.store.update_memory(memory.memory_id, summary="Updated")
+        _ = self.store.update_memory(memory.memory_id, summary="Updated")
         event = self.store.record_event(
             type="email_seen",
             text="Pat sent the invoice",
@@ -57,13 +71,13 @@ class MemoryHybridTests(unittest.TestCase):
         )
 
         with self._connect() as conn:
-            rows = conn.execute(
+            rows = _rows(conn.execute(
                 """
                 SELECT idempotency_key, entity_type, entity_id, operation, status
                 FROM memory_index_queue
                 ORDER BY entity_type, entity_id
                 """
-            ).fetchall()
+            ).fetchall())
 
         self.assertEqual(len(rows), 2)
         self.assertTrue(
@@ -85,7 +99,7 @@ class MemoryHybridTests(unittest.TestCase):
             title="Batch indexing",
             summary="Batch this memory",
         )
-        event = self.store.record_event(
+        _event = self.store.record_event(
             type="note",
             text="Batch this event too",
             memory_id=memory.memory_id,
@@ -104,11 +118,13 @@ class MemoryHybridTests(unittest.TestCase):
         self.assertEqual(fake_pc.embed_calls[0]["count"], 2)
         self.assertEqual(fake_pc.embed_calls[1]["count"], 2)
         self.assertEqual(len(fake_index.upserts), 1)
-        self.assertEqual(len(fake_index.upserts[0]["vectors"]), 2)
+        first_vectors = fake_index.upserts[0]["vectors"]
+        assert isinstance(first_vectors, Sequence)
+        self.assertEqual(len(first_vectors), 2)
         with self._connect() as conn:
             statuses = [
                 row["status"]
-                for row in conn.execute("SELECT status FROM memory_index_queue").fetchall()
+                for row in _rows(conn.execute("SELECT status FROM memory_index_queue").fetchall())
             ]
         self.assertEqual(statuses, ["done", "done"])
 
@@ -129,14 +145,15 @@ class MemoryHybridTests(unittest.TestCase):
 
         self.assertEqual(synced, 0)
         with self._connect() as conn:
-            row = conn.execute(
+            row = _row(conn.execute(
                 "SELECT id, status, attempts, available_at FROM memory_index_queue WHERE entity_id = ?",
                 (memory.memory_id,),
-            ).fetchone()
+            ).fetchone())
+            assert row is not None
             self.assertEqual(row["status"], "failed")
             self.assertEqual(row["attempts"], 1)
             self.assertIsNotNone(row["available_at"])
-            conn.execute(
+            _ = conn.execute(
                 """
                 UPDATE memory_index_queue
                 SET attempts = max_attempts - 1,
@@ -151,13 +168,14 @@ class MemoryHybridTests(unittest.TestCase):
             "server.services.memory.indexer._pinecone_index",
             return_value=(fake_pc, fake_index),
         ):
-            MemoryIndexer(self.db_path).sync_pending(limit=10)
+            _ = MemoryIndexer(self.db_path).sync_pending(limit=10)
 
         with self._connect() as conn:
-            dead = conn.execute(
+            dead = _row(conn.execute(
                 "SELECT status, available_at FROM memory_index_queue WHERE entity_id = ?",
                 (memory.memory_id,),
-            ).fetchone()
+            ).fetchone())
+            assert dead is not None
             self.assertEqual(dead["status"], "dead")
             self.assertIsNone(dead["available_at"])
             stats = MemoryIndexer(self.db_path).queue_stats()
@@ -167,20 +185,23 @@ class MemoryHybridTests(unittest.TestCase):
             "server.services.memory.indexer._pinecone_index",
             return_value=(fake_pc, fake_index),
         ):
-            MemoryIndexer(self.db_path).sync_pending(limit=10)
+            _ = MemoryIndexer(self.db_path).sync_pending(limit=10)
         self.assertEqual(len(fake_index.upserts), 2)
 
     def test_indexer_delete_operation_deletes_pinecone_vector(self) -> None:
         fake_pc = _FakePinecone()
         fake_index = _FakeIndex()
         with self._connect() as conn:
-            conn.execute(
+            _ = conn.execute(
                 """
                 INSERT INTO memory_index_queue (
-                    id, idempotency_key, entity_type, entity_id, operation, version,
-                    status, attempts, available_at, max_attempts, created_at, updated_at
+                    id, workspace_id, idempotency_key, entity_type, entity_id,
+                    operation, version, status, attempts, available_at,
+                    max_attempts, created_at, updated_at
                 ) VALUES (
-                    'idx_delete', 'delete:memory:mem_deleted', 'memory', 'mem_deleted',
+                    'idx_delete', 'test_workspace',
+                    'test_workspace:delete:memory:mem_deleted',
+                    'memory', 'mem_deleted',
                     'delete', '1', 'pending', 0, '2000-01-01T00:00:00.000Z', 5,
                     '2000-01-01T00:00:00.000Z', '2000-01-01T00:00:00.000Z'
                 )
@@ -195,12 +216,16 @@ class MemoryHybridTests(unittest.TestCase):
             synced = MemoryIndexer(self.db_path).sync_pending(limit=10)
 
         self.assertEqual(synced, 1)
-        self.assertEqual(fake_index.deletes, [{"ids": ["memory:mem_deleted"], "namespace": "openpoke"}])
+        self.assertEqual(
+            fake_index.deletes,
+            [{"ids": ["memory:mem_deleted"], "namespace": "test_workspace"}],
+        )
         with self._connect() as conn:
-            status = conn.execute(
+            status_row = _row(conn.execute(
                 "SELECT status FROM memory_index_queue WHERE id = 'idx_delete'"
-            ).fetchone()["status"]
-            self.assertEqual(status, "done")
+            ).fetchone())
+            assert status_row is not None
+            self.assertEqual(status_row["status"], "done")
 
     def test_serializers_include_text_links_and_metadata(self) -> None:
         memory = self.store.create_memory(
@@ -247,6 +272,7 @@ class MemoryHybridTests(unittest.TestCase):
             candidates = exact_link_candidates(
                 conn,
                 "Find the ops@example.com thread thread-99990000",
+                workspace_id="test_workspace",
             )
 
         self.assertTrue(candidates)
@@ -261,7 +287,7 @@ class MemoryHybridTests(unittest.TestCase):
         )
 
         first = record_gmail_tool_result(
-            tool_name="GMAIL_CREATE_EMAIL_DRAFT",
+            tool_name="GOOGLESUPER_CREATE_EMAIL_DRAFT",
             result={
                 "data": {
                     "id": "draft-a",
@@ -277,7 +303,7 @@ class MemoryHybridTests(unittest.TestCase):
             store=self.store,
         )
         second = record_gmail_tool_result(
-            tool_name="GMAIL_CREATE_EMAIL_DRAFT",
+            tool_name="GOOGLESUPER_CREATE_EMAIL_DRAFT",
             result={
                 "data": {
                     "id": "draft-b",
@@ -330,7 +356,7 @@ class MemoryHybridTests(unittest.TestCase):
             title="Send Alice email",
         )
         [draft_memory_id] = record_gmail_tool_result(
-            tool_name="GMAIL_CREATE_EMAIL_DRAFT",
+            tool_name="GOOGLESUPER_CREATE_EMAIL_DRAFT",
             result={
                 "data": {
                     "id": "draft-a",
@@ -347,7 +373,7 @@ class MemoryHybridTests(unittest.TestCase):
         )
 
         [sent_memory_id] = record_gmail_tool_result(
-            tool_name="GMAIL_SEND_DRAFT",
+            tool_name="GOOGLESUPER_SEND_DRAFT",
             result={
                 "data": {
                     "id": "message-a",
@@ -385,27 +411,27 @@ class MemoryHybridTests(unittest.TestCase):
 
     def test_default_search_logs_do_not_include_event_text(self) -> None:
         memory = self.store.create_memory(kind="user_task", title="Private note")
-        self.store.record_event(
+        _ = self.store.record_event(
             type="note",
             text="Sensitive event snippet",
             memory_id=memory.memory_id,
         )
 
         with patch("server.services.memory.indexer.pinecone_enabled", return_value=False), self.assertLogs(
-            "openpoke", level="INFO"
+            "openpoke", level="DEBUG"
         ) as captured:
-            self.store.search("private sensitive", limit=3)
+            _ = self.store.search("private sensitive", limit=3)
 
         self.assertNotIn("Sensitive event snippet", "\n".join(captured.output))
 
     def test_render_memory_context_can_prefer_query_relevant_events(self) -> None:
         memory = self.store.create_memory(kind="user_task", title="Vendor search")
-        self.store.record_event(
+        _ = self.store.record_event(
             type="note",
             text="The user rejected Acme because pricing was too high",
             memory_id=memory.memory_id,
         )
-        self.store.record_event(
+        _ = self.store.record_event(
             type="note",
             text="Latest status is waiting for procurement",
             memory_id=memory.memory_id,
@@ -425,11 +451,21 @@ class MemoryHybridTests(unittest.TestCase):
         conn.row_factory = sqlite3.Row
         return conn
 
+
 class _FakeInference:
+    _parent: "_FakePinecone"
+
     def __init__(self, parent: "_FakePinecone") -> None:
         self._parent = parent
 
-    def embed(self, *, model, inputs, parameters):
+    def embed(
+        self,
+        *,
+        model: str,
+        inputs: Sequence[object],
+        parameters: Mapping[str, object],
+    ) -> list[dict[str, object]]:
+        _ = parameters
         self._parent.embed_calls.append({"model": model, "count": len(inputs)})
         if model == "llama-text-embed-v2":
             return [{"values": [0.1, 0.2, 0.3]} for _ in inputs]
@@ -440,26 +476,33 @@ class _FakeInference:
 
 
 class _FakePinecone:
+    embed_calls: list[dict[str, object]]
+    inference: _FakeInference
+
     def __init__(self) -> None:
         self.embed_calls = []
         self.inference = _FakeInference(self)
 
 
 class _FakeIndex:
+    upserts: list[dict[str, object]]
+    deletes: list[dict[str, object]]
+    fail_upsert: bool
+
     def __init__(self, *, fail_upsert: bool = False) -> None:
         self.upserts = []
         self.deletes = []
         self.fail_upsert = fail_upsert
 
-    def upsert(self, *, vectors, namespace):
+    def upsert(self, *, vectors: Sequence[object], namespace: str) -> None:
         if self.fail_upsert:
             self.upserts.append({"vectors": vectors, "namespace": namespace})
             raise RuntimeError("upsert failed")
         self.upserts.append({"vectors": vectors, "namespace": namespace})
 
-    def delete(self, *, ids, namespace):
+    def delete(self, *, ids: Sequence[str], namespace: str) -> None:
         self.deletes.append({"ids": ids, "namespace": namespace})
 
 
 if __name__ == "__main__":
-    unittest.main()
+    _ = unittest.main()

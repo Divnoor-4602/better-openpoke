@@ -7,6 +7,9 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontSize: {
+        13: '0.8125rem',
+      },
       colors: {
         brand: {
           50: '#f0f7ff',
@@ -27,4 +30,3 @@ const config: Config = {
 };
 
 export default config;
-

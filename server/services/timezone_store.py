@@ -1,4 +1,4 @@
-"""Persist and expose the user's preferred timezone."""
+"""Persist and expose each workspace's preferred timezone."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ from pathlib import Path
 
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from ..core.paths import get_data_dir
+from ..core.workspace_context import require_current_workspace
 from ..logging_config import logger
 
 
@@ -42,7 +44,10 @@ class TimezoneStore:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             _ = self._path.write_text(validated, encoding="utf-8")
             self._cached = validated
-            logger.info("updated timezone preference", extra={"timezone": validated})
+            logger.info(
+                "updated timezone preference",
+                extra={"timezone": validated, "path": str(self._path)},
+            )
 
     def clear(self) -> None:
         with self._lock:
@@ -51,7 +56,9 @@ class TimezoneStore:
                 if self._path.exists():
                     _ = self._path.unlink()
             except Exception as exc:  # pragma: no cover - defensive
-                logger.warning("failed to clear timezone file", extra={"error": str(exc)})
+                logger.warning(
+                    "failed to clear timezone file", extra={"error": str(exc)}
+                )
 
     def _validate(self, timezone_name: str) -> str:
         candidate = (timezone_name or "").strip()
@@ -64,14 +71,35 @@ class TimezoneStore:
         return candidate
 
 
-_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-_TIMEZONE_PATH = _DATA_DIR / "timezone.txt"
+_DATA_DIR = get_data_dir()
+_TIMEZONE_DIR = _DATA_DIR / "timezone"
 
-_timezone_store = TimezoneStore(_TIMEZONE_PATH)
-
-
-def get_timezone_store() -> TimezoneStore:
-    return _timezone_store
+_cache: dict[str, TimezoneStore] = {}
+_cache_lock = threading.Lock()
 
 
-__all__ = ["TimezoneStore", "get_timezone_store"]
+def _resolve_workspace(workspace_id: str | None) -> str:
+    return workspace_id or require_current_workspace()
+
+
+def get_timezone_store(workspace_id: str | None = None) -> TimezoneStore:
+    workspace_id = _resolve_workspace(workspace_id)
+    cached = _cache.get(workspace_id)
+    if cached is not None:
+        return cached
+    with _cache_lock:
+        cached = _cache.get(workspace_id)
+        if cached is None:
+            path = _TIMEZONE_DIR / f"{workspace_id}.txt"
+            cached = TimezoneStore(path)
+            _cache[workspace_id] = cached
+        return cached
+
+
+def reset_timezone_cache() -> None:
+    """Test helper: clear the per-workspace cache."""
+    with _cache_lock:
+        _cache.clear()
+
+
+__all__ = ["TimezoneStore", "get_timezone_store", "reset_timezone_cache"]

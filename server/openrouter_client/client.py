@@ -113,16 +113,28 @@ def _headers(*, api_key: str | None = None) -> dict[str, str]:
 
 
 def _build_messages(
-    messages: Sequence[Mapping[str, str]], system: str | None
+    messages: Sequence[Mapping[str, object]], system: str | None
 ) -> list[OpenRouterMessage]:
     openrouter_messages: list[OpenRouterMessage] = []
     for message in messages:
-        role = _coerce_role(message.get("role"))
+        role = _coerce_role(str(message.get("role") or ""))
         if role is None:
             continue
-        openrouter_messages.append(
-            OpenRouterMessage(role=role, content=message.get("content") or "")
+        openrouter_message = OpenRouterMessage(
+            role=role, content=str(message.get("content") or "")
         )
+        tool_call_id = message.get("tool_call_id")
+        if isinstance(tool_call_id, str) and tool_call_id:
+            openrouter_message["tool_call_id"] = tool_call_id
+        name = message.get("name")
+        if isinstance(name, str) and name:
+            openrouter_message["name"] = name
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list):
+            openrouter_message["tool_calls"] = cast(
+                list[OpenRouterToolCall], tool_calls
+            )
+        openrouter_messages.append(openrouter_message)
     if system:
         return [OpenRouterMessage(role="system", content=system), *openrouter_messages]
     return openrouter_messages
@@ -172,7 +184,7 @@ def _json_object(payload: Mapping[object, object]) -> JsonObject:
 async def request_chat_completion(
     *,
     model: str,
-    messages: Sequence[Mapping[str, str]],
+    messages: Sequence[Mapping[str, object]],
     system: str | None = None,
     api_key: str | None = None,
     tools: Sequence[Mapping[str, object]] | None = None,
@@ -219,7 +231,7 @@ async def request_chat_completion(
 async def stream_chat_completion(
     *,
     model: str,
-    messages: Sequence[Mapping[str, str]],
+    messages: Sequence[Mapping[str, object]],
     system: str | None = None,
     api_key: str | None = None,
     tools: Sequence[Mapping[str, object]] | None = None,

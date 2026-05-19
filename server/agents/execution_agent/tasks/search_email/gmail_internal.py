@@ -6,9 +6,10 @@ and should not be exposed as public tools to execution agents.
 
 from __future__ import annotations
 
-from typing import Any
-
-from server.services.gmail.client import execute_gmail_tool, get_active_gmail_user_id
+from server.services.gmail.client import (
+    execute_google_tool,
+    resolve_workspace_gmail_user_id,
+)
 
 # Schema for the internal LLM to call gmail_fetch_emails
 GMAIL_FETCH_EMAILS_SCHEMA = {
@@ -49,13 +50,13 @@ def gmail_fetch_emails(
     include_payload: bool | None = None,
     include_spam_trash: bool | None = None,
     verbose: bool | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Fetch Gmail messages with optional filters and verbosity controls.
-    
+
     This is an internal function for the search_email task and should not
     be exposed as a public tool to execution agents.
     """
-    arguments: dict[str, Any] = {
+    arguments: dict[str, object] = {
         "query": query,
         "label_ids": label_ids,
         "max_results": max_results,
@@ -65,12 +66,14 @@ def gmail_fetch_emails(
         "include_spam_trash": include_spam_trash,
         "verbose": verbose,
     }
-    composio_user_id = get_active_gmail_user_id()
+    composio_user_id = resolve_workspace_gmail_user_id()
     if not composio_user_id:
         return {"error": "Gmail not connected. Please connect Gmail in settings first."}
-    
+
     # Use the same composio integration as the public tools
-    return execute_gmail_tool("GMAIL_FETCH_EMAILS", composio_user_id, arguments=arguments)
+    return execute_google_tool(
+        "GOOGLESUPER_FETCH_EMAILS", composio_user_id, arguments=arguments
+    )
 
 
 __all__ = [
