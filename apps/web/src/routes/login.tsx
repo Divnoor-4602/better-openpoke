@@ -6,8 +6,6 @@ import { authKeys } from '@/lib/poke/auth'
 
 export const Route = createFileRoute('/login')({
   beforeLoad: async ({ context }) => {
-    if (typeof window === 'undefined') return
-
     if (!getAuthToken()) return
 
     try {
@@ -26,4 +24,6 @@ export const Route = createFileRoute('/login')({
     throw redirect({ to: '/' })
   },
   component: LoginLayout,
+  // Auth lives in client memory; the guard is meaningless on the server.
+  ssr: false,
 })

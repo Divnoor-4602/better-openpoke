@@ -41,6 +41,11 @@ export const ChatThread = ({
 
   const isStreaming = status === 'streaming' || status === 'submitted'
 
+  const visibleError =
+    error && error instanceof DOMException && error.name === 'AbortError'
+      ? undefined
+      : error
+
   const handleStop = () => {
     onStop()
     setHalted(true)
@@ -103,8 +108,10 @@ export const ChatThread = ({
           </div>
           {slots?.emptyStateFooter}
         </div>
-        {error && (
-          <p className="text-xs text-destructive px-2 mt-1">{error.message}</p>
+        {visibleError && (
+          <p className="text-xs text-destructive px-2 mt-1">
+            {visibleError.message}
+          </p>
         )}
       </MaxWidthWrapper>
     </div>

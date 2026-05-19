@@ -58,15 +58,17 @@ export const AppLayout = ({
               >
                 <ClockIcon />
               </TooltipTrigger>
-              <Button
-                aria-label="Reset dev state"
-                onClick={handleReset}
-                size="icon-sm"
-                title="Reset dev state"
-                variant="ghost"
-              >
-                <ArrowCounterClockwiseIcon />
-              </Button>
+              {import.meta.env.DEV ? (
+                <Button
+                  aria-label="Reset dev state"
+                  onClick={handleReset}
+                  size="icon-sm"
+                  title="Reset dev state"
+                  variant="ghost"
+                >
+                  <ArrowCounterClockwiseIcon />
+                </Button>
+              ) : null}
             </TopbarMenuGroup>
             {topbarEnd ? <TopbarMenuGroup>{topbarEnd}</TopbarMenuGroup> : null}
             <TopbarTooltip />

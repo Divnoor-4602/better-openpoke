@@ -1,5 +1,7 @@
-import { clsx, type ClassValue } from "clsx"
-import { extendTailwindMerge } from "tailwind-merge"
+import type { ClassValue } from 'clsx'
+
+import { clsx } from 'clsx'
+import { extendTailwindMerge } from 'tailwind-merge'
 
 // Register custom font-size utilities defined via @theme tokens in styles.css
 // (e.g. --text-13) so tailwind-merge doesn't drop them when combined with a
@@ -7,7 +9,7 @@ import { extendTailwindMerge } from "tailwind-merge"
 const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {
-      "font-size": ["text-13"],
+      'font-size': ['text-13'],
     },
   },
 })

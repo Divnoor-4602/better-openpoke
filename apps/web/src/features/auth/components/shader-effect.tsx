@@ -1,12 +1,12 @@
-import {
-  Dither,
-  FilmGrain,
-  GridDistortion,
-  ImageTexture,
-  Shader,
-} from 'shaders/react'
+import { useReducedMotion } from 'motion/react'
+import { Dither, GridDistortion, ImageTexture, Shader } from 'shaders/react'
+
+import { ShaderFallback } from './shader-fallback'
 
 export const ShaderEffect = () => {
+  const shouldReduceMotion = useReducedMotion()
+  if (shouldReduceMotion) return <ShaderFallback />
+
   return (
     <Shader className="absolute inset-0 w-full h-full">
       <ImageTexture
@@ -17,7 +17,6 @@ export const ShaderEffect = () => {
         objectFit="contain"
         transform={{
           anchorY: 0.7,
-
           scale: 0.1,
         }}
         url="https://data.shaders.com/storage/v1/object/public/user-uploaded-images/user_3DuobzafRfHSxH4Lf9P6PMgzHqW/UhRKY7PywUu3.png"
@@ -34,7 +33,6 @@ export const ShaderEffect = () => {
         transform={{ scale: 1 }}
         visible
       />
-      <FilmGrain visible={false} />
     </Shader>
   )
 }

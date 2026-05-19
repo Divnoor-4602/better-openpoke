@@ -13,19 +13,16 @@ type ReminderEvent = {
 const RECONNECT_MIN_MS = 2_000
 const RECONNECT_MAX_MS = 30_000
 
-/**
- * Subscribes once (per mount) to the workspace's reminder fire stream.
- *
- * `EventSource` can't send Authorization headers, so we hand-roll the SSE
- * read on top of `fetch`. The connection stays alive while the tab is
- * open; on disconnect it reconnects with exponential backoff.
- */
 export function useReminderNotifications(): void {
   useEffect(() => {
-    let aborted = false
-    let controller: AbortController | null = null
-    let timer: null | ReturnType<typeof setTimeout> = null
-    let backoff = RECONNECT_MIN_MS
+    const session = {
+      aborted: false,
+      backoff: RECONNECT_MIN_MS,
+      controller: null as AbortController | null,
+      // tracks the most-recent connect() so a token change can invalidate it.
+      generation: 0,
+      timer: null as null | ReturnType<typeof setTimeout>,
+    }
 
     const deliverReminder = (event: ReminderEvent) => {
       const delivered = notify('Reminder', event.payload)
@@ -36,7 +33,7 @@ export function useReminderNotifications(): void {
       const reader = body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-      while (!aborted) {
+      while (!session.aborted) {
         const { done, value } = await reader.read()
         if (done) return
         buffer += decoder.decode(value, { stream: true })
@@ -57,21 +54,30 @@ export function useReminderNotifications(): void {
       }
     }
 
-    const scheduleReconnect = () => {
-      if (aborted) return
-      timer = setTimeout(() => void connect(), backoff)
-      backoff = Math.min(backoff * 2, RECONNECT_MAX_MS)
+    const scheduleReconnect = (delay: number) => {
+      if (session.aborted) return
+      if (session.timer) clearTimeout(session.timer)
+      session.timer = setTimeout(() => {
+        session.timer = null
+        void connect()
+      }, delay)
     }
 
     const connect = async () => {
-      if (aborted) return
+      if (session.aborted) return
+      const myGeneration = ++session.generation
+      const isCurrent = () =>
+        !session.aborted && session.generation === myGeneration
+
       const token = getAuthToken()
       if (!token) {
-        scheduleReconnect()
+        scheduleReconnect(session.backoff)
+        session.backoff = Math.min(session.backoff * 2, RECONNECT_MAX_MS)
         return
       }
 
-      controller = new AbortController()
+      const controller = new AbortController()
+      session.controller = controller
       try {
         const response = await fetch(
           `${resolveBaseUrl()}/api/reminders/events`,
@@ -86,30 +92,31 @@ export function useReminderNotifications(): void {
         if (!response.ok || !response.body) {
           throw new Error(`reminder stream failed: ${response.status}`)
         }
-        backoff = RECONNECT_MIN_MS
+        session.backoff = RECONNECT_MIN_MS
         await readStream(response.body)
       } catch (err) {
-        // `aborted` flips inside the cleanup closure; the narrowing is
-        // wrong here.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        if (aborted) return
         if (err instanceof DOMException && err.name === 'AbortError') return
+      } finally {
+        if (session.controller === controller) session.controller = null
       }
-      scheduleReconnect()
+
+      if (!isCurrent()) return
+      scheduleReconnect(session.backoff)
+      session.backoff = Math.min(session.backoff * 2, RECONNECT_MAX_MS)
     }
 
     void connect()
     const unsubscribeToken = subscribeAuthToken(() => {
-      // token changed (login/logout) — drop the current stream so the next
-      // connect picks up the new credentials.
-      controller?.abort()
+      session.backoff = RECONNECT_MIN_MS
+      session.controller?.abort()
+      scheduleReconnect(0)
     })
 
     return () => {
-      aborted = true
+      session.aborted = true
       unsubscribeToken()
-      controller?.abort()
-      if (timer) clearTimeout(timer)
+      session.controller?.abort()
+      if (session.timer) clearTimeout(session.timer)
     }
   }, [])
 }

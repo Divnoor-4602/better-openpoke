@@ -1,5 +1,3 @@
-import { useRef } from 'react'
-
 import { requestNotificationPermissionIfDefault } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
@@ -26,7 +24,6 @@ export const ChatInput = ({
 }: ChatInputProps) => {
   const value = useChatDraftStore((s) => s.text)
   const setValue = useChatDraftStore((s) => s.setText)
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   const handleSubmit = () => {
     const text = value.trim()
@@ -72,7 +69,6 @@ export const ChatInput = ({
           }}
           onKeyDown={handleKeyDown}
           placeholder="Ask me to draft, email, schedule, remind, or follow up"
-          ref={textareaRef}
           value={value}
         />
       </div>

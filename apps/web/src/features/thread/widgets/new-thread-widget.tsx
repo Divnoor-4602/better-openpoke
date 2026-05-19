@@ -2,6 +2,7 @@ import { useChat } from '@ai-sdk/react'
 import { openPokeDataPartSchemas, OpenPokeTransport } from '@openpoke/sdk'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
+import { useState } from 'react'
 
 import type { ChatThreadSlots } from '@/features/assistant/components/layout/chat-thread'
 import type { OpenPokeChatMessage } from '@/features/assistant/types'
@@ -18,7 +19,9 @@ type NewThreadWidgetProps = {
 export function NewThreadWidget({ slots }: NewThreadWidgetProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const transport = new OpenPokeTransport(poke)
+  // Pin the transport for this widget's lifetime; re-creating it would reset
+  // `useChat` and lose the in-flight thread assignment.
+  const [transport] = useState(() => new OpenPokeTransport(poke))
 
   const { error, messages, sendMessage, status, stop } =
     useChat<OpenPokeChatMessage>({

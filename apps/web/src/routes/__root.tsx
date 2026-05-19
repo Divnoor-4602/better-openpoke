@@ -9,7 +9,6 @@ import {
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 
 import { Toaster } from '@/components/ui/sonner'
-import { useReminderNotifications } from '@/lib/poke/use-reminder-notifications'
 
 import TanStackQueryDevtools from '../lib/tanstack-query/devtools'
 import appCss from '../styles.css?url'
@@ -35,7 +34,7 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
         name: 'viewport',
       },
       {
-        title: 'TanStack Start Starter',
+        title: 'General Poke',
       },
     ],
   }),
@@ -43,7 +42,6 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-  useReminderNotifications()
   return (
     <html lang="en">
       <head>

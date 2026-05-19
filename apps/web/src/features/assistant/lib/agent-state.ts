@@ -52,6 +52,7 @@ export const ACTIVE_TOOL_LABELS = [
   'Jorking',
   'UGAHHHHH',
   'In-progress',
+  'Dilly-dallying',
 ] as const
 
 const NON_TOOL_EVENT_TYPES: ReadonlySet<string> = new Set([
@@ -239,21 +240,20 @@ export type CatalogVariant =
   | { kind: 'integrations-button'; message?: string }
 
 export type MessageBlock =
+  | { calls: NormalizedToolCall[]; id: string; type: 'tools' }
+  | { id: string; text: string; type: 'text' }
   | {
       id: string
       placement: CatalogPlacement
       type: 'catalog'
       variant: CatalogVariant
     }
-  | { calls: NormalizedToolCall[]; id: string; type: 'tools' }
-  | { id: string; text: string; type: 'text' }
-
 
 export function buildMessageBlocks(
   message: OpenPokeChatMessage,
   options: { suppressIntegrationsButton?: boolean } = {},
 ): MessageBlock[] {
-  const parts = message.parts ?? []
+  const parts = message.parts
   const callsById = new Map<string, NormalizedToolCall>()
   for (const call of getNormalizedToolCalls(message)) {
     callsById.set(call.toolCallId, call)
@@ -345,7 +345,7 @@ export function getActiveToolCall(
 }
 
 export function getAssistantText(message: OpenPokeChatMessage): string {
-  const parts = message.parts ?? []
+  const parts = message.parts
   return parts
     .filter(isTextUIPart)
     .map((part) => part.text)
@@ -356,7 +356,7 @@ export function getNormalizedToolCalls(
   message: OpenPokeChatMessage,
   options: { includeHidden?: boolean } = {},
 ): NormalizedToolCall[] {
-  const parts = message.parts ?? []
+  const parts = message.parts
   const byId = new Map<string, NormalizedToolCall>()
 
   parts.forEach((part, index) => {

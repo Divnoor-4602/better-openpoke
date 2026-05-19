@@ -54,14 +54,6 @@ const zCalendarCreateEventStrict = z.object({
     .string()
     .optional()
     .describe('Created Google Calendar event id, when available.'),
-  meet_link: z
-    .string()
-    .optional()
-    .describe(
-      'Google Meet URL (Google Calendar `hangoutLink`) when one is ' +
-        'attached to the event. Populated from the create/patch response, ' +
-        'not from the LLM input.',
-    ),
   force_overlap: z
     .boolean()
     .optional()
@@ -75,6 +67,14 @@ const zCalendarCreateEventStrict = z.object({
     .string()
     .optional()
     .describe('Physical or virtual location text.'),
+  meet_link: z
+    .string()
+    .optional()
+    .describe(
+      'Google Meet URL (Google Calendar `hangoutLink`) when one is ' +
+        'attached to the event. Populated from the create/patch response, ' +
+        'not from the LLM input.',
+    ),
   recurrence: z
     .array(z.string())
     .optional()

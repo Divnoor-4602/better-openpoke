@@ -41,7 +41,7 @@ export const AssistantMessage = ({
           return (
             <Streamdown
               animated
-              className="prose prose-sm  max-w-none text-sm leading-relaxed"
+              className="prose prose-sm max-w-none text-sm leading-relaxed"
               components={STREAMDOWN_COMPONENTS}
               isAnimating={isStreaming}
               key={block.id}

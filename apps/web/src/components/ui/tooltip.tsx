@@ -1,5 +1,3 @@
-'use client'
-
 import type React from 'react'
 
 import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip'

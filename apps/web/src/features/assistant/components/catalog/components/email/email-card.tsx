@@ -109,30 +109,28 @@ type EditableTextProps = {
   onChange: (value: string) => void
 }
 
-const DraftEmailSubject = ({
-  disabled,
-  editable,
-  onChange,
-  subject,
-}: EditableTextProps & { subject: string }) => {
-  // Adopt external prop changes (e.g. agent re-edits the draft) without
-  // clobbering in-flight typing — derived-state-from-props pattern.
-  const [value, setValue] = useState(subject)
-  const [lastSubject, setLastSubject] = useState(subject)
-  if (subject !== lastSubject) {
-    setLastSubject(subject)
-    setValue(subject)
-  }
+type SubjectProps = EditableTextProps & { subject: string }
 
-  if (!editable) {
-    if (!subject) return null
+const DraftEmailSubject = (props: SubjectProps) => {
+  if (!props.editable) {
+    if (!props.subject) return null
     return (
       <div className="px-4">
-        <span className="text-sm font-normal">{subject}</span>
+        <span className="text-sm font-normal">{props.subject}</span>
       </div>
     )
   }
+  // Key on external value so an upstream agent edit remounts the editor
+  // instead of racing with the user's debounced keystrokes.
+  return <DraftEmailSubjectEditor {...props} key={props.subject} />
+}
 
+const DraftEmailSubjectEditor = ({
+  disabled,
+  onChange,
+  subject,
+}: SubjectProps) => {
+  const [value, setValue] = useState(subject)
   return (
     <div className="px-4">
       <input
@@ -150,28 +148,22 @@ const DraftEmailSubject = ({
   )
 }
 
-const DraftEmailBody = ({
-  body,
-  disabled,
-  editable,
-  onChange,
-}: EditableTextProps & { body: string }) => {
-  const [value, setValue] = useState(body)
-  const [lastBody, setLastBody] = useState(body)
-  if (body !== lastBody) {
-    setLastBody(body)
-    setValue(body)
-  }
+type BodyProps = EditableTextProps & { body: string }
 
-  if (!editable) {
-    if (!body) return null
+const DraftEmailBody = (props: BodyProps) => {
+  if (!props.editable) {
+    if (!props.body) return null
     return (
       <div className="whitespace-pre-wrap px-4 text-13 font-light leading-relaxed">
-        {body}
+        {props.body}
       </div>
     )
   }
+  return <DraftEmailBodyEditor {...props} key={props.body} />
+}
 
+const DraftEmailBodyEditor = ({ body, disabled, onChange }: BodyProps) => {
+  const [value, setValue] = useState(body)
   return (
     <textarea
       aria-label="Email body"

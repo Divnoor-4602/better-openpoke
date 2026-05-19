@@ -14,13 +14,13 @@ export const Route = createFileRoute('/_authenticated/threads/new')({
 function NewThreadRoute() {
   return (
     <AppLayout
-      unwrapped
       topbarEnd={
         <div className="flex items-center gap-1">
           <GoogleTopbarMenu handle={topbarTooltip} />
           <WorkspaceMenuWidget />
         </div>
       }
+      unwrapped
     >
       <NewThreadWidget
         slots={{

@@ -1,5 +1,3 @@
-import { useState } from 'react'
-
 import type { AssistantState } from '../../lib/agent-state'
 import type { OpenPokeChatMessage } from '../../types'
 
@@ -25,7 +23,7 @@ export const Message = ({
   integrationPrompt,
   message,
 }: MessageProps) => {
-  const [createdAt] = useState<number>(() => readCreatedAt(message))
+  const createdAt = readCreatedAt(message)
 
   if (message.role === 'user') {
     const text = getAssistantText(message)

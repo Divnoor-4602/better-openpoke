@@ -45,6 +45,7 @@ export type AssistantIndicatorProps = {
 }
 
 export function AssistantIndicator({ state }: AssistantIndicatorProps) {
+  const shouldReduceMotion = useReducedMotion()
   const isResting = state.type === 'idle' || state.type === 'ready'
   const isActive =
     state.type === 'thinking' ||
@@ -61,7 +62,7 @@ export function AssistantIndicator({ state }: AssistantIndicatorProps) {
   return (
     <div className="flex items-center gap-2">
       <GeneralMagicLogo
-        animating={isActive}
+        animating={isActive && !shouldReduceMotion}
         className="size-3.5"
         quadrantColors={quadrantColors}
       />

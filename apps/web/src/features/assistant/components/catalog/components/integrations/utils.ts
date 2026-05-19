@@ -37,7 +37,7 @@ export const getGoogleNotConnectedMessage = (
 export const findGoogleNotConnectedTrigger = (
   message: OpenPokeChatMessage,
 ): null | { toolCallId: string } => {
-  const parts = message.parts ?? []
+  const parts = message.parts
   for (const part of parts) {
     const candidate = part as {
       data?: { event?: { error?: unknown; output?: unknown } }

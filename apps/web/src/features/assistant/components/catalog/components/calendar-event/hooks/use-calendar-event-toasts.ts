@@ -2,7 +2,7 @@ import type { QueryClient } from '@tanstack/react-query'
 
 import { CalendarBlankIcon } from '@phosphor-icons/react'
 import { useQueryClient } from '@tanstack/react-query'
-import { createElement } from 'react'
+import { createElement, useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 
 import type {
@@ -10,7 +10,6 @@ import type {
   CalendarEventPatch,
 } from '@/lib/poke/calendar'
 
-import { useMountEffect } from '@/hooks/use-mount-effect'
 import { calendarEventKeys, useUpdateCalendarEvent } from '@/lib/poke/calendar'
 
 import {
@@ -28,26 +27,27 @@ type Burst = {
   touchedFields: Set<keyof CalendarEventPatch>
 }
 
-const bursts = new Map<string, Burst>()
-
 export function useCalendarEventUpdateToast(eventId: string) {
   const queryClient = useQueryClient()
   const updateMutation = useUpdateCalendarEvent(eventId)
 
-  useMountEffect(() => () => {
-    const burst = bursts.get(eventId)
-    if (burst?.pendingTimer) clearTimeout(burst.pendingTimer)
-    bursts.delete(eventId)
-  })
+  const burstRef = useRef<Burst | null>(null)
+
+  useEffect(() => {
+    return () => {
+      const burst = burstRef.current
+      if (burst?.pendingTimer) clearTimeout(burst.pendingTimer)
+      burstRef.current = null
+    }
+  }, [])
 
   return (patch: CalendarEventPatch) => {
-    let burst = bursts.get(eventId)
+    let burst = burstRef.current
     if (!burst) {
       const previous = queryClient.getQueryData<CalendarEventCacheValue>(
         calendarEventKeys.byId(eventId),
       )
       if (!previous) {
-        // No cache entry — bail to a fire-and-forget mutation without toast.
         updateMutation.mutate(patch)
         return
       }
@@ -57,7 +57,7 @@ export function useCalendarEventUpdateToast(eventId: string) {
         toastId: null,
         touchedFields: new Set(),
       }
-      bursts.set(eventId, burst)
+      burstRef.current = burst
     }
     for (const key of Object.keys(patch)) {
       burst.touchedFields.add(key as keyof CalendarEventPatch)
@@ -65,11 +65,11 @@ export function useCalendarEventUpdateToast(eventId: string) {
 
     updateMutation.mutate(patch, {
       onSuccess: () => {
-        const current = bursts.get(eventId)
+        const current = burstRef.current
         if (!current) return
         if (current.pendingTimer) clearTimeout(current.pendingTimer)
         current.pendingTimer = setTimeout(() => {
-          emitToast(eventId, queryClient, updateMutation)
+          emitToast(eventId, queryClient, updateMutation, burstRef)
         }, TOAST_DEBOUNCE_MS)
       },
     })
@@ -80,8 +80,9 @@ const emitToast = (
   eventId: string,
   queryClient: QueryClient,
   updateMutation: ReturnType<typeof useUpdateCalendarEvent>,
+  burstRef: React.RefObject<Burst | null>,
 ) => {
-  const burst = bursts.get(eventId)
+  const burst = burstRef.current
   if (!burst) return
 
   const current = queryClient.getQueryData<CalendarEventCacheValue>(
@@ -102,7 +103,7 @@ const emitToast = (
 
   const description = current ? describeEvent(current) : undefined
 
-  bursts.delete(eventId)
+  burstRef.current = null
 
   toast('Event has been updated', {
     action: {

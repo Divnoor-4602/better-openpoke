@@ -23,7 +23,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { useMountEffect } from '@/hooks/use-mount-effect'
 import { cn } from '@/lib/utils'
 
 const SIDEBAR_COOKIE_NAME = 'sidebar_state'
@@ -327,67 +326,58 @@ function SidebarProvider({
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = React.useState(false)
 
-  // This is the internal state of the sidebar.
-  // We use openProp and setOpenProp for control from outside the component.
+  // Internal open state; openProp/setOpenProp let callers control externally.
   const [_open, _setOpen] = React.useState(defaultOpen)
   const open = openProp ?? _open
-  const setOpen = React.useCallback(
-    (value: ((value: boolean) => boolean) | boolean) => {
-      const openState = typeof value === 'function' ? value(open) : value
-      if (setOpenProp) {
-        setOpenProp(openState)
-      } else {
-        _setOpen(openState)
-      }
+  const setOpen = (value: ((value: boolean) => boolean) | boolean) => {
+    const openState = typeof value === 'function' ? value(open) : value
+    if (setOpenProp) {
+      setOpenProp(openState)
+    } else {
+      _setOpen(openState)
+    }
+    document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+  }
 
-      // This sets the cookie to keep the sidebar state.
-      document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
-    },
-    [setOpenProp, open],
-  )
-
-  // Helper to toggle the sidebar.
-  const toggleSidebar = React.useCallback(() => {
+  const toggleSidebar = () => {
     return isMobile
       ? setOpenMobile((isOpen) => !isOpen)
       : setOpen((isOpen) => !isOpen)
-  }, [isMobile, setOpen, setOpenMobile])
+  }
 
-  const toggleSidebarRef = React.useRef(toggleSidebar)
-  React.useEffect(() => {
-    toggleSidebarRef.current = toggleSidebar
+  // `useEffectEvent` keeps the keydown handler stable while always seeing the
+  // latest toggleSidebar without re-binding the window listener.
+  const onShortcut = React.useEffectEvent(() => {
+    toggleSidebar()
   })
-  useMountEffect(() => {
+
+  React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
         event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
         (event.metaKey || event.ctrlKey)
       ) {
         event.preventDefault()
-        toggleSidebarRef.current()
+        onShortcut()
       }
     }
-
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  })
+  }, [])
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
-  // This makes it easier to style the sidebar with Tailwind classes.
   const state = open ? 'expanded' : 'collapsed'
 
-  const contextValue = React.useMemo<SidebarContextProps>(
-    () => ({
-      isMobile,
-      open,
-      openMobile,
-      setOpen,
-      setOpenMobile,
-      state,
-      toggleSidebar,
-    }),
-    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar],
-  )
+  // react-compiler memoizes this automatically; no manual useMemo needed.
+  const contextValue: SidebarContextProps = {
+    isMobile,
+    open,
+    openMobile,
+    setOpen,
+    setOpenMobile,
+    state,
+    toggleSidebar,
+  }
 
   return (
     <SidebarContext.Provider value={contextValue}>
@@ -508,6 +498,14 @@ const sidebarMenuButtonVariants = cva(
   },
 )
 
+function hashStringToInt(input: string): number {
+  let hash = 0
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash * 31 + input.charCodeAt(i)) >>> 0
+  }
+  return hash
+}
+
 function SidebarMenuAction({
   className,
   render,
@@ -617,10 +615,10 @@ function SidebarMenuSkeleton({
 }: React.ComponentProps<'div'> & {
   showIcon?: boolean
 }) {
-  // Random width between 50 to 90%.
-  const [width] = React.useState(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`
-  })
+  // Deterministic varied width (50–90%) derived from the instance id so each
+  // skeleton looks distinct without runtime randomness — SSR and client agree.
+  const reactId = React.useId()
+  const width = `${50 + (hashStringToInt(reactId) % 41)}%`
 
   return (
     <div

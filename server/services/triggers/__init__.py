@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from ...core.paths import get_data_dir
 from .models import TriggerRecord
 from .service import TriggerService

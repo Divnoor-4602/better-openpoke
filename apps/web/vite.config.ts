@@ -15,7 +15,7 @@ const config = defineConfig({
     viteReact(),
     babel({ presets: [reactCompilerPreset()] }),
   ],
-  resolve: { tsconfigPaths: true, dedupe: ['react', 'react-dom'] },
+  resolve: { dedupe: ['react', 'react-dom'], tsconfigPaths: true },
 })
 
 export default config

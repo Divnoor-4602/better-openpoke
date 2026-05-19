@@ -6,7 +6,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-
 import { z } from 'zod'
 
 import { TOOL_SCHEMAS } from '../src/features/assistant/components/catalog/schemas'
@@ -23,6 +22,4 @@ const out = Object.fromEntries(
 
 mkdirSync(dirname(target), { recursive: true })
 writeFileSync(target, JSON.stringify(out, null, 2) + '\n')
-console.log(
-  `wrote ${Object.keys(out).length} tool schemas → ${target}`,
-)
+console.log(`wrote ${Object.keys(out).length} tool schemas → ${target}`)

@@ -2,11 +2,10 @@ import { getAuthToken, retrieveMe } from '@openpoke/sdk'
 import { createFileRoute, Outlet, redirect } from '@tanstack/react-router'
 
 import { authKeys } from '@/lib/poke/auth'
+import { useReminderNotifications } from '@/lib/poke/use-reminder-notifications'
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: async ({ context }) => {
-    if (typeof window === 'undefined') return { workspaceId: null }
-
     if (!getAuthToken()) throw redirect({ to: '/login' })
     try {
       const me = await context.queryClient.ensureQueryData({
@@ -23,5 +22,12 @@ export const Route = createFileRoute('/_authenticated')({
       throw redirect({ to: '/login' })
     }
   },
-  component: Outlet,
+  component: AuthenticatedLayout,
+
+  ssr: false,
 })
+
+function AuthenticatedLayout() {
+  useReminderNotifications()
+  return <Outlet />
+}

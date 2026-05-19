@@ -10,21 +10,18 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 export type OptimisticMutationOptions<TCache, TData, TVars> = {
-  // The TanStack cache key the optimistic patch targets.
-  queryKey: readonly unknown[]
-  // Unique mutationKey for this op (helps TanStack dedupe in-flight mutations).
-  mutationKey: readonly unknown[]
   // Server call that returns the canonical response payload.
   mutationFn: (vars: TVars) => Promise<TData>
+  // Unique mutationKey for this op (helps TanStack dedupe in-flight mutations).
+  mutationKey: readonly unknown[]
+  // Patch applied after the server confirms success. Use for fields the
+  // server is authoritative over (e.g. rotated id).
+  onSuccess?: (response: TData, current: TCache) => Partial<TCache> | undefined
   // Patch applied to the cached value during onMutate. Skipped when the
   // cache has no existing entry (avoids polluting unrelated drafts/events).
   optimistic?: (previous: TCache, vars: TVars) => Partial<TCache>
-  // Patch applied after the server confirms success. Use for fields the
-  // server is authoritative over (e.g. rotated id).
-  onSuccess?: (
-    response: TData,
-    current: TCache,
-  ) => Partial<TCache> | undefined
+  // The TanStack cache key the optimistic patch targets.
+  queryKey: readonly unknown[]
 }
 
 export function useOptimisticMutation<TCache, TData, TVars = void>(

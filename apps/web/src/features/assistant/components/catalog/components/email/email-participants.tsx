@@ -1,7 +1,7 @@
 import type { KeyboardEvent } from 'react'
 
 import { PlusIcon, UserIcon, XIcon } from '@phosphor-icons/react'
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 
@@ -195,21 +195,15 @@ const ParticipantInput = ({
   onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void
   value: string
 }) => {
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
-
   return (
     <input
       aria-label="Recipient email"
+      autoFocus
       className="h-5 min-w-40 rounded-poke border bg-transparent px-2 text-xs font-light outline-none ring-0 placeholder:text-muted-foreground focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
       onBlur={onBlur}
       onChange={(event) => onChange(event.target.value)}
       onKeyDown={onKeyDown}
       placeholder="name@example.com"
-      ref={inputRef}
       value={value}
     />
   )

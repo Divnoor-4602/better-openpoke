@@ -14,7 +14,7 @@ export const LoginLayout = () => {
         <div className="flex flex-1 items-center justify-center">
           <div className="max-w-sm flex flex-col items-center w-full gap-8">
             <div className="flex flex-col gap-4 items-center">
-              <div className="font-heading font-bold text-4xl text-[#1c1c1c] tracking-tight">
+              <div className="font-heading font-bold text-4xl text-foreground tracking-tight">
                 General Poke
               </div>
               <span className="font-normal text-muted-foreground text-13 text-center">

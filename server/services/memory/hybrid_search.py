@@ -193,7 +193,7 @@ def pinecone_candidates(
         return []
 
     try:
-        from pinecone import Pinecone  # type: ignore[import-untyped]
+        from pinecone import Pinecone
 
         pinecone_factory = cast(type[_PineconeClient], Pinecone)
         pc = pinecone_factory(api_key=api_key)  # pyright: ignore[reportCallIssue]

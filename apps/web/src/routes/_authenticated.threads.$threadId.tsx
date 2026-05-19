@@ -30,13 +30,13 @@ function ThreadDetailRoute() {
   const { threadId } = Route.useParams()
   return (
     <AppLayout
-      unwrapped
       topbarEnd={
         <div className="flex items-center gap-1">
           <GoogleTopbarMenu handle={topbarTooltip} />
           <WorkspaceMenuWidget />
         </div>
       }
+      unwrapped
     >
       <ThreadDetailWidget
         key={threadId}

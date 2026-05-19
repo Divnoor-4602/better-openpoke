@@ -55,24 +55,13 @@ const calendarPatchFromInput = (input: unknown): Record<string, unknown> => {
 }
 
 export const GOOGLE_SYNC_REGISTRY: Record<string, GoogleSyncEntry> = {
-  // Execution-agent tool that calls GOOGLESUPER_SEND_DRAFT via Composio.
-  // On success the draft has left Gmail — flip the UI to terminal "sent"
-  // so the user can't click Send a second time.
-  gmail_execute_draft: {
+  // Execution-agent tool that calls GOOGLESUPER_DELETE_EVENT via Composio.
+  // Flip status to 'discarded' so the widget's footer / action surface
+  // collapses to the terminal state.
+  calendar_delete_event: {
     keyFn: (input) => {
-      const draftId = getDraftId(input)
-      return draftId ? gmailDraftKeys.byId(draftId) : null
-    },
-    patch: () => ({ status: 'sent' }),
-  },
-  // Execution-agent tool that calls GOOGLESUPER_DELETE_DRAFT via Composio.
-  // On success the Gmail resource is gone — flip the UI to "discarded"
-  // (footer Send button becomes outline "Discarded", Open-in-Gmail link
-  // hides — see email-footer.tsx).
-  gmail_delete_draft: {
-    keyFn: (input) => {
-      const draftId = getDraftId(input)
-      return draftId ? gmailDraftKeys.byId(draftId) : null
+      const eventId = getEventId(input)
+      return eventId ? calendarEventKeys.byId(eventId) : null
     },
     patch: () => ({ status: 'discarded' }),
   },
@@ -87,14 +76,25 @@ export const GOOGLE_SYNC_REGISTRY: Record<string, GoogleSyncEntry> = {
     },
     patch: (input) => ({ ...calendarPatchFromInput(input), status: 'updated' }),
   },
-  // Execution-agent tool that calls GOOGLESUPER_DELETE_EVENT via Composio.
-  // Flip status to 'discarded' so the widget's footer / action surface
-  // collapses to the terminal state.
-  calendar_delete_event: {
+  // Execution-agent tool that calls GOOGLESUPER_DELETE_DRAFT via Composio.
+  // On success the Gmail resource is gone — flip the UI to "discarded"
+  // (footer Send button becomes outline "Discarded", Open-in-Gmail link
+  // hides — see email-footer.tsx).
+  gmail_delete_draft: {
     keyFn: (input) => {
-      const eventId = getEventId(input)
-      return eventId ? calendarEventKeys.byId(eventId) : null
+      const draftId = getDraftId(input)
+      return draftId ? gmailDraftKeys.byId(draftId) : null
     },
     patch: () => ({ status: 'discarded' }),
+  },
+  // Execution-agent tool that calls GOOGLESUPER_SEND_DRAFT via Composio.
+  // On success the draft has left Gmail — flip the UI to terminal "sent"
+  // so the user can't click Send a second time.
+  gmail_execute_draft: {
+    keyFn: (input) => {
+      const draftId = getDraftId(input)
+      return draftId ? gmailDraftKeys.byId(draftId) : null
+    },
+    patch: () => ({ status: 'sent' }),
   },
 }

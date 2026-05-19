@@ -23,7 +23,7 @@ def install_custom_openapi(app: FastAPI) -> None:
         app.openapi_schema = schema
         return app.openapi_schema
 
-    app.openapi = custom_openapi  # type: ignore[method-assign]
+    app.openapi = custom_openapi
 
 
 def _assign_stable_operation_ids(app: FastAPI) -> None:

@@ -26,6 +26,9 @@ const featureIsolationZones = featureDirs.map((featureName) => ({
 }))
 
 export default [
+  {
+    ignores: ['.output/**', 'dist/**', 'node_modules/**'],
+  },
   ...tanstackConfig,
   perfectionist.configs['recommended-natural'],
   eslintConfigPrettier,

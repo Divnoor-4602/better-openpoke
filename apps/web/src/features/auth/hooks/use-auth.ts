@@ -18,9 +18,7 @@ export const useAuth = () => {
     ? 'checking'
     : meQuery.isError
       ? 'unauthenticated'
-      : meQuery.data
-        ? 'authenticated'
-        : 'unauthenticated'
+      : 'authenticated'
 
   return {
     isAuthenticated: status === 'authenticated',

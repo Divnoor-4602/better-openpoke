@@ -60,7 +60,7 @@ def _default_google_user_id() -> str:
 
 
 def _gmail_import_client() -> Callable[..., object]:
-    from composio import Composio  # type: ignore[import-untyped]
+    from composio import Composio
 
     return cast(Callable[..., object], Composio)
 

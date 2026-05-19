@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import cast
 
-from fastapi import HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -45,14 +45,8 @@ def error_response(
     )
 
 
-def register_exception_handlers(app: object) -> None:
-    from fastapi import FastAPI
-
-    fastapi_app = app if isinstance(app, FastAPI) else None
-    if fastapi_app is None:  # pragma: no cover - defensive
-        raise TypeError("register_exception_handlers requires a FastAPI app")
-
-    @fastapi_app.exception_handler(RequestValidationError)
+def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(RequestValidationError)
     async def _validation_exception_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
@@ -70,7 +64,7 @@ def register_exception_handlers(app: object) -> None:
 
     _ = _validation_exception_handler
 
-    @fastapi_app.exception_handler(HTTPException)
+    @app.exception_handler(HTTPException)
     async def _http_exception_handler(
         request: Request, exc: HTTPException
     ) -> JSONResponse:
@@ -97,7 +91,7 @@ def register_exception_handlers(app: object) -> None:
 
     _ = _http_exception_handler
 
-    @fastapi_app.exception_handler(Exception)
+    @app.exception_handler(Exception)
     async def _unhandled_exception_handler(
         request: Request, exc: Exception
     ) -> JSONResponse:

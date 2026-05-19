@@ -115,26 +115,20 @@ type SummaryFieldProps = {
   summary?: string
 }
 
-const SummaryField = ({
+const SummaryField = (props: SummaryFieldProps) => {
+  if (!props.editable) {
+    return <span className="text-sm font-normal">{props.summary ?? ''}</span>
+  }
+
+  return <SummaryEditor {...props} key={props.summary ?? ''} />
+}
+
+const SummaryEditor = ({
   disabled,
-  editable,
   onChange,
   summary = '',
 }: SummaryFieldProps) => {
-  // Adopt external prop changes (e.g. agent re-edits the same field while
-  // the widget is mounted) without clobbering in-flight typing — the
-  // documented "derived state from props" pattern with a prev-prop sentinel.
   const [value, setValue] = useState(summary)
-  const [lastSummary, setLastSummary] = useState(summary)
-  if (summary !== lastSummary) {
-    setLastSummary(summary)
-    setValue(summary)
-  }
-
-  if (!editable) {
-    return <span className="text-sm font-normal">{summary}</span>
-  }
-
   return (
     <input
       aria-label="Event title"
@@ -157,30 +151,26 @@ type DescriptionFieldProps = {
   onChange: (value: string) => void
 }
 
-const DescriptionField = ({
-  description = '',
-  disabled,
-  editable,
-  onChange,
-}: DescriptionFieldProps) => {
-  const [value, setValue] = useState(description)
-  const [lastDescription, setLastDescription] = useState(description)
-  if (description !== lastDescription) {
-    setLastDescription(description)
-    setValue(description)
-  }
-
-  if (!editable) {
-    if (!description) return null
+const DescriptionField = (props: DescriptionFieldProps) => {
+  if (!props.editable) {
+    if (!props.description) return null
     return (
       <div className="mt-3">
         <span className="text-xs font-normal text-muted-foreground">
-          {description}
+          {props.description}
         </span>
       </div>
     )
   }
+  return <DescriptionEditor {...props} key={props.description ?? ''} />
+}
 
+const DescriptionEditor = ({
+  description = '',
+  disabled,
+  onChange,
+}: DescriptionFieldProps) => {
+  const [value, setValue] = useState(description)
   return (
     <textarea
       aria-label="Event description"

@@ -12,12 +12,12 @@ const extractCalendarOutput = (
   const root = output as Record<string, unknown>
   const data = (root.data as Record<string, unknown> | undefined) ?? root
   const inner =
-    (data?.response_data as Record<string, unknown> | undefined) ?? data
+    (data.response_data as Record<string, unknown> | undefined) ?? data
   const result: { event_id?: string; meet_link?: string } = {}
-  const id = inner?.id ?? inner?.event_id
+  const id = inner.id ?? inner.event_id
   if (typeof id === 'string' && id) result.event_id = id
 
-  const meet = inner?.hangoutLink ?? inner?.hangout_link ?? inner?.meet_link
+  const meet = inner.hangoutLink ?? inner.hangout_link ?? inner.meet_link
   if (typeof meet === 'string' && meet) result.meet_link = meet
   return result
 }

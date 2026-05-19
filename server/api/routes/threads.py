@@ -119,10 +119,10 @@ def update_thread(
 async def _safe_generate_title(thread_id: str, repository: ThreadRepository) -> None:
     try:
         _ = await generate_title_for_thread(thread_id, repository=repository)
-    except Exception as exc:  # noqa: BLE001 - background task, log and swallow
-        logger.warning(
+    except Exception:
+        logger.exception(
             "background thread title generation failed",
-            extra={"thread_id": thread_id, "error": str(exc)},
+            extra={"thread_id": thread_id},
         )
 
 
@@ -147,10 +147,8 @@ async def generate_thread_title(
             status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found"
         ) from exc
     except OpenRouterError as exc:
-        logger.error(
-            "thread title generation failed",
-            extra={"thread_id": threadId, "error": str(exc)},
-        )
+        # Let the global Exception handler log with traceback; we just need to
+        # translate to a 500 with a user-facing message.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Thread title generation failed",
@@ -296,38 +294,26 @@ async def stream_thread_message(
         )
         runtime = InteractionAgentRuntime()
     except ThreadNotFoundError as exc:
-        logger.error("thread not found", extra={"error": str(exc)})
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
         ) from exc
     except ValueError as exc:
-        logger.error("configuration error", extra={"error": str(exc)})
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
 
-    print(
-        f"[stream_thread_message] threadId={threadId} user_content={user_content!r}",
-        flush=True,
-    )
-
-    async def _traced():
-        i = 0
+    async def _streaming():
         async for chunk in runtime.stream_execute(
             user_content,
             thread_id=threadId,
             turn_index=user_record.turn_index,
             notifications=payload.notifications,
         ):
-            preview = chunk if len(chunk) < 300 else chunk[:300] + "...<truncated>"
-            print(f"[stream_thread_message] chunk[{i}] {preview!r}", flush=True)
-            i += 1
             yield chunk
-        print(f"[stream_thread_message] done total_chunks={i}", flush=True)
         _ = asyncio.create_task(_safe_generate_title(threadId, repository))
 
     return StreamingResponse(
-        _traced(),
+        _streaming(),
         media_type="text/event-stream",
         headers={
             "x-vercel-ai-ui-message-stream": "v1",
