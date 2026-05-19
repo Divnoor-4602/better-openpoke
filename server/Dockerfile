@@ -18,9 +18,10 @@ RUN pip install -r /app/server/requirements.txt
 
 COPY server /app/server
 
-# Persistent volume mount target on Railway.
+# Persistent data dir. On Railway, attach a Volume to this path via the
+# dashboard or `railway volume add` — VOLUME declarations are rejected by
+# Railway's builder.
 ENV OPENPOKE_DATA_DIR=/data
-VOLUME ["/data"]
 
 EXPOSE 8001
 CMD ["sh", "-c", "python -m server.server --host 0.0.0.0 --port ${PORT:-8001}"]
