@@ -5,8 +5,11 @@ FROM oven/bun:1.3.4 AS builder
 WORKDIR /repo
 
 # Install workspace deps using the root lockfile.
+# Root package.json lists `server` as a workspace, so bun needs to see its
+# package.json (a tiny dev shim) even though we don't run any JS for it.
 COPY package.json bun.lock turbo.json /repo/
 COPY apps/web/package.json /repo/apps/web/package.json
+COPY server/package.json /repo/server/package.json
 COPY packages /repo/packages
 RUN bun install --frozen-lockfile
 

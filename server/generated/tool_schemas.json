@@ -30,16 +30,16 @@
         "description": "Created Google Calendar event id, when available.",
         "type": "string"
       },
-      "meet_link": {
-        "description": "Google Meet URL (Google Calendar `hangoutLink`) when one is attached to the event. Populated from the create/patch response, not from the LLM input.",
-        "type": "string"
-      },
       "force_overlap": {
         "description": "Server-side override: skip the freebusy precheck and create the event even if it overlaps an existing one. Set true ONLY after the user has explicitly confirmed scheduling despite a known conflict. The UI ignores this field.",
         "type": "boolean"
       },
       "location": {
         "description": "Physical or virtual location text.",
+        "type": "string"
+      },
+      "meet_link": {
+        "description": "Google Meet URL (Google Calendar `hangoutLink`) when one is attached to the event. Populated from the create/patch response, not from the LLM input.",
         "type": "string"
       },
       "recurrence": {
