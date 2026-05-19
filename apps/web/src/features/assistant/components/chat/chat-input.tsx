@@ -2,7 +2,6 @@ import { requestNotificationPermissionIfDefault } from '@/lib/notifications'
 import { cn } from '@/lib/utils'
 
 import { useChatDraftStore } from '../../store/chat-draft-store'
-import { AttachmentsButton } from './attachments-button'
 import { SendButton } from './send-button'
 
 type ChatInputProps = {
@@ -72,8 +71,8 @@ export const ChatInput = ({
           value={value}
         />
       </div>
-      <div className="flex items-center justify-between">
-        <AttachmentsButton />
+      <div className="flex items-center justify-end">
+        {/* <AttachmentsButton />*/}
         <SendButton
           disabled={disabled || !hasText}
           hasText={hasText}

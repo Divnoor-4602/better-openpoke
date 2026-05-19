@@ -1,6 +1,8 @@
+import type { AssistantState } from '../../lib/agent-state'
 import type { OpenPokeChatMessage } from '../../types'
 
 import { useAssistantState } from '../../hooks/use-assistant-state'
+import { AssistantIndicator } from './assistant-indicator'
 import { Message } from './message'
 
 type ChatStatus = Parameters<typeof useAssistantState>[0]
@@ -12,6 +14,12 @@ type MessageListProps = {
   status: ChatStatus
 }
 
+const IN_FLIGHT_STATES: ReadonlySet<AssistantState['type']> = new Set([
+  'active',
+  'thinking',
+  'typing',
+])
+
 export const MessageList = ({
   halted,
   integrationPrompt,
@@ -21,6 +29,8 @@ export const MessageList = ({
   const assistantState = useAssistantState(status, messages, halted)
   const lastAssistantIdx = messages.findLastIndex((m) => m.role === 'assistant')
   const lastAssistantIsTail = lastAssistantIdx === messages.length - 1
+  const showPendingIndicator =
+    IN_FLIGHT_STATES.has(assistantState.type) && !lastAssistantIsTail
 
   return (
     <div className="@container/thread px-6 py-4 flex flex-col">
@@ -46,6 +56,11 @@ export const MessageList = ({
           </div>
         )
       })}
+      {showPendingIndicator && (
+        <div className="mt-6">
+          <AssistantIndicator state={assistantState} />
+        </div>
+      )}
     </div>
   )
 }
