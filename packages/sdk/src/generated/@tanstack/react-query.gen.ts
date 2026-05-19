@@ -3,8 +3,8 @@
 import { type InfiniteData, infiniteQueryOptions, queryOptions, type UseMutationOptions } from '@tanstack/react-query';
 
 import { client } from '../client.gen';
-import { connectIntegration, createThread, createThreadAgentRun, createThreadMessage, deleteThread, disconnectIntegration, listAgentRuns, listThreadAgentRuns, listThreadMessages, listThreads, type Options, retrieveAgentRun, retrieveHealth, retrieveIntegrationStatus, retrieveThread, updateThread } from '../sdk.gen';
-import type { ConnectIntegrationData, ConnectIntegrationError, ConnectIntegrationResponse, CreateThreadAgentRunData, CreateThreadAgentRunError, CreateThreadAgentRunResponse, CreateThreadData, CreateThreadError, CreateThreadMessageData, CreateThreadMessageError, CreateThreadMessageResponse, CreateThreadResponse, DeleteThreadData, DeleteThreadError, DeleteThreadResponse, DisconnectIntegrationData, DisconnectIntegrationError, DisconnectIntegrationResponse, ListAgentRunsData, ListAgentRunsError, ListAgentRunsResponse, ListThreadAgentRunsData, ListThreadAgentRunsError, ListThreadAgentRunsResponse, ListThreadMessagesData, ListThreadMessagesError, ListThreadMessagesResponse, ListThreadsData, ListThreadsError, ListThreadsResponse, RetrieveAgentRunData, RetrieveAgentRunError, RetrieveAgentRunResponse, RetrieveHealthData, RetrieveHealthError, RetrieveHealthResponse, RetrieveIntegrationStatusData, RetrieveIntegrationStatusError, RetrieveIntegrationStatusResponse, RetrieveThreadData, RetrieveThreadError, RetrieveThreadResponse, UpdateThreadData, UpdateThreadError, UpdateThreadResponse } from '../types.gen';
+import { connectIntegration, createThread, createThreadAgentRun, createThreadMessage, deleteThread, devReset, discardCalendarEvent, discardGmailDraft, disconnectIntegration, generateThreadTitle, listAgentRuns, listThreadAgentRuns, listThreadMessages, listThreads, listWorkspaces, type Options, retrieveAgentRun, retrieveHealth, retrieveIntegrationStatus, retrieveMe, retrieveThread, retrieveTimezone, sendGmailDraft, setTimezone, streamReminderEvents, updateCalendarEvent, updateGmailDraft, updateThread } from '../sdk.gen';
+import type { ConnectIntegrationData, ConnectIntegrationError, ConnectIntegrationResponse, CreateThreadAgentRunData, CreateThreadAgentRunError, CreateThreadAgentRunResponse, CreateThreadData, CreateThreadError, CreateThreadMessageData, CreateThreadMessageError, CreateThreadMessageResponse, CreateThreadResponse, DeleteThreadData, DeleteThreadError, DeleteThreadResponse, DevResetData, DevResetError, DevResetResponse, DiscardCalendarEventData, DiscardCalendarEventError, DiscardCalendarEventResponse, DiscardGmailDraftData, DiscardGmailDraftError, DiscardGmailDraftResponse, DisconnectIntegrationData, DisconnectIntegrationError, DisconnectIntegrationResponse, GenerateThreadTitleData, GenerateThreadTitleError, GenerateThreadTitleResponse, ListAgentRunsData, ListAgentRunsError, ListAgentRunsResponse, ListThreadAgentRunsData, ListThreadAgentRunsError, ListThreadAgentRunsResponse, ListThreadMessagesData, ListThreadMessagesError, ListThreadMessagesResponse, ListThreadsData, ListThreadsError, ListThreadsResponse, ListWorkspacesData, ListWorkspacesError, ListWorkspacesResponse, RetrieveAgentRunData, RetrieveAgentRunError, RetrieveAgentRunResponse, RetrieveHealthData, RetrieveHealthError, RetrieveHealthResponse, RetrieveIntegrationStatusData, RetrieveIntegrationStatusError, RetrieveIntegrationStatusResponse, RetrieveMeData, RetrieveMeError, RetrieveMeResponse, RetrieveThreadData, RetrieveThreadError, RetrieveThreadResponse, RetrieveTimezoneData, RetrieveTimezoneError, RetrieveTimezoneResponse, SendGmailDraftData, SendGmailDraftError, SendGmailDraftResponse, SetTimezoneData, SetTimezoneError, SetTimezoneResponse, StreamReminderEventsData, StreamReminderEventsError, UpdateCalendarEventData, UpdateCalendarEventError, UpdateCalendarEventResponse, UpdateGmailDraftData, UpdateGmailDraftError, UpdateGmailDraftResponse, UpdateThreadData, UpdateThreadError, UpdateThreadResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -38,6 +38,24 @@ const createQueryKey = <TOptions extends Options>(id: string, options?: TOptions
     }
     return [params];
 };
+
+export const listWorkspacesQueryKey = (options?: Options<ListWorkspacesData>) => createQueryKey('listWorkspaces', options, false, ['admin']);
+
+/**
+ * List all workspaces registered on this server (demo visibility)
+ */
+export const listWorkspacesOptions = (options?: Options<ListWorkspacesData>) => queryOptions<ListWorkspacesResponse, ListWorkspacesError, ListWorkspacesResponse, ReturnType<typeof listWorkspacesQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listWorkspaces({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listWorkspacesQueryKey(options)
+});
 
 export const listAgentRunsQueryKey = (options?: Options<ListAgentRunsData>) => createQueryKey('listAgentRuns', options, false, ['agent-runs']);
 
@@ -131,6 +149,108 @@ export const retrieveAgentRunOptions = (options: Options<RetrieveAgentRunData>) 
     queryKey: retrieveAgentRunQueryKey(options)
 });
 
+/**
+ * Discard a Google Calendar event
+ */
+export const discardCalendarEventMutation = (options?: Partial<Options<DiscardCalendarEventData>>): UseMutationOptions<DiscardCalendarEventResponse, DiscardCalendarEventError, Options<DiscardCalendarEventData>> => {
+    const mutationOptions: UseMutationOptions<DiscardCalendarEventResponse, DiscardCalendarEventError, Options<DiscardCalendarEventData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await discardCalendarEvent({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Update a Google Calendar event
+ */
+export const updateCalendarEventMutation = (options?: Partial<Options<UpdateCalendarEventData>>): UseMutationOptions<UpdateCalendarEventResponse, UpdateCalendarEventError, Options<UpdateCalendarEventData>> => {
+    const mutationOptions: UseMutationOptions<UpdateCalendarEventResponse, UpdateCalendarEventError, Options<UpdateCalendarEventData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await updateCalendarEvent({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Truncate dev tables and clear conversation logs for the caller's workspace
+ */
+export const devResetMutation = (options?: Partial<Options<DevResetData>>): UseMutationOptions<DevResetResponse, DevResetError, Options<DevResetData>> => {
+    const mutationOptions: UseMutationOptions<DevResetResponse, DevResetError, Options<DevResetData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await devReset({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Discard a Gmail draft
+ */
+export const discardGmailDraftMutation = (options?: Partial<Options<DiscardGmailDraftData>>): UseMutationOptions<DiscardGmailDraftResponse, DiscardGmailDraftError, Options<DiscardGmailDraftData>> => {
+    const mutationOptions: UseMutationOptions<DiscardGmailDraftResponse, DiscardGmailDraftError, Options<DiscardGmailDraftData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await discardGmailDraft({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Update a Gmail draft
+ */
+export const updateGmailDraftMutation = (options?: Partial<Options<UpdateGmailDraftData>>): UseMutationOptions<UpdateGmailDraftResponse, UpdateGmailDraftError, Options<UpdateGmailDraftData>> => {
+    const mutationOptions: UseMutationOptions<UpdateGmailDraftResponse, UpdateGmailDraftError, Options<UpdateGmailDraftData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await updateGmailDraft({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Send a Gmail draft
+ */
+export const sendGmailDraftMutation = (options?: Partial<Options<SendGmailDraftData>>): UseMutationOptions<SendGmailDraftResponse, SendGmailDraftError, Options<SendGmailDraftData>> => {
+    const mutationOptions: UseMutationOptions<SendGmailDraftResponse, SendGmailDraftError, Options<SendGmailDraftData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await sendGmailDraft({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
 export const retrieveHealthQueryKey = (options?: Options<RetrieveHealthData>) => createQueryKey('retrieveHealth', options, false, ['health']);
 
 /**
@@ -199,6 +319,77 @@ export const retrieveIntegrationStatusOptions = (options: Options<RetrieveIntegr
         return data;
     },
     queryKey: retrieveIntegrationStatusQueryKey(options)
+});
+
+export const retrieveMeQueryKey = (options?: Options<RetrieveMeData>) => createQueryKey('retrieveMe', options, false, ['auth']);
+
+/**
+ * Return the authenticated caller's workspace
+ */
+export const retrieveMeOptions = (options?: Options<RetrieveMeData>) => queryOptions<RetrieveMeResponse, RetrieveMeError, RetrieveMeResponse, ReturnType<typeof retrieveMeQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await retrieveMe({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: retrieveMeQueryKey(options)
+});
+
+export const retrieveTimezoneQueryKey = (options?: Options<RetrieveTimezoneData>) => createQueryKey('retrieveTimezone', options, false, ['meta']);
+
+/**
+ * Get user timezone
+ */
+export const retrieveTimezoneOptions = (options?: Options<RetrieveTimezoneData>) => queryOptions<RetrieveTimezoneResponse, RetrieveTimezoneError, RetrieveTimezoneResponse, ReturnType<typeof retrieveTimezoneQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await retrieveTimezone({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: retrieveTimezoneQueryKey(options)
+});
+
+/**
+ * Set user timezone
+ */
+export const setTimezoneMutation = (options?: Partial<Options<SetTimezoneData>>): UseMutationOptions<SetTimezoneResponse, SetTimezoneError, Options<SetTimezoneData>> => {
+    const mutationOptions: UseMutationOptions<SetTimezoneResponse, SetTimezoneError, Options<SetTimezoneData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await setTimezone({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const streamReminderEventsQueryKey = (options?: Options<StreamReminderEventsData>) => createQueryKey('streamReminderEvents', options, false, ['reminders']);
+
+/**
+ * Stream reminder fire events
+ */
+export const streamReminderEventsOptions = (options?: Options<StreamReminderEventsData>) => queryOptions<unknown, StreamReminderEventsError, unknown, ReturnType<typeof streamReminderEventsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await streamReminderEvents({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: streamReminderEventsQueryKey(options)
 });
 
 export const listThreadsQueryKey = (options?: Options<ListThreadsData>) => createQueryKey('listThreads', options, false, ['threads']);
@@ -429,6 +620,23 @@ export const createThreadMessageMutation = (options?: Partial<Options<CreateThre
     const mutationOptions: UseMutationOptions<CreateThreadMessageResponse, CreateThreadMessageError, Options<CreateThreadMessageData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await createThreadMessage({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Generate a thread title
+ */
+export const generateThreadTitleMutation = (options?: Partial<Options<GenerateThreadTitleData>>): UseMutationOptions<GenerateThreadTitleResponse, GenerateThreadTitleError, Options<GenerateThreadTitleData>> => {
+    const mutationOptions: UseMutationOptions<GenerateThreadTitleResponse, GenerateThreadTitleError, Options<GenerateThreadTitleData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await generateThreadTitle({
                 ...options,
                 ...fnOptions,
                 throwOnError: true

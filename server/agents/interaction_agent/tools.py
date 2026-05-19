@@ -16,8 +16,9 @@ from ...services.execution import (
     get_execution_agent_logs,
     get_execution_event_store,
 )
-from ...services.gmail.client import get_active_gmail_user_id
+from ...services.gmail.client import resolve_workspace_gmail_user_id
 from ...services.memory import MemorySearchResult, get_memory_store
+from ..tool_schemas import TOOL_SCHEMAS as CATALOG_SCHEMAS
 
 if TYPE_CHECKING:
     from ..execution_agent.batch_manager import ExecutionBatchManager
@@ -49,14 +50,37 @@ class _SendMessageToUserArgs(TypedDict):
     message: str
 
 
-class _SendDraftArgs(TypedDict):
+class _DraftAttachmentArgs(TypedDict, total=False):
+    name: str
+    mimetype: str | None
+    s3key: str | None
+
+
+class _SendDraftArgs(TypedDict, total=False):
     to: str
     subject: str
     body: str
+    cc: list[str] | None
+    bcc: list[str] | None
+    extra_recipients: list[str] | None
+    is_html: bool | None
+    thread_id: str | None
+    draft_id: str | None
+    attachment: _DraftAttachmentArgs | None
 
 
 class _WaitArgs(TypedDict):
     reason: str
+
+
+class _CancelExecutionArgs(TypedDict, total=False):
+    memory_id: Required[str]
+    reason: str
+
+
+class _SendFollowupArgs(TypedDict):
+    memory_id: str
+    message: str
 
 
 @dataclass
@@ -187,25 +211,9 @@ TOOL_SCHEMAS: list[_JsonObject] = [
         "function": {
             "name": "send_draft",
             "description": "Record an email draft so the user can review the exact text.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "to": {
-                        "type": "string",
-                        "description": "Recipient email for the draft.",
-                    },
-                    "subject": {
-                        "type": "string",
-                        "description": "Email subject for the draft.",
-                    },
-                    "body": {
-                        "type": "string",
-                        "description": "Email body content (plain text).",
-                    },
-                },
-                "required": ["to", "subject", "body"],
-                "additionalProperties": False,
-            },
+            # Parameters come from the web catalog's Zod schema, converted
+            # via apps/web/scripts/generate-tool-schemas.ts.
+            "parameters": cast(_JsonObject, CATALOG_SCHEMAS["send_draft"]),
         },
     },
     {
@@ -222,6 +230,64 @@ TOOL_SCHEMAS: list[_JsonObject] = [
                     },
                 },
                 "required": ["reason"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_followup_to_agent",
+            "description": (
+                "Add a clarification, constraint, or amendment to an already-"
+                "running execution agent WITHOUT cancelling its progress. The "
+                "running agent will pick up the follow-up at its next iteration "
+                "boundary. Only valid for memory_id values currently in "
+                "<active_execution_runs>. Use this for refinements like "
+                "'also exclude X', 'make sure to include Y', or 'use template Z' "
+                "— do NOT use it to start unrelated tasks."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "memory_id": {
+                        "type": "string",
+                        "description": "memory_id of the in-flight task to amend. MUST appear in <active_execution_runs>.",
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "The amendment / clarification, written for the agent (not the user).",
+                    },
+                },
+                "required": ["memory_id", "message"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_execution",
+            "description": (
+                "Stop an in-flight execution agent. Only valid for memory_id values "
+                "currently listed in <in_flight>. Returns whether cancellation was "
+                "effective (the task was alive and got the signal) or arrived too "
+                "late (task already finished). Never call speculatively — only on "
+                "explicit user request to stop / cancel / nevermind an ongoing task."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "memory_id": {
+                        "type": "string",
+                        "description": "memory_id of the in-flight task to cancel. MUST appear in <in_flight>.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Short user-facing reason for the cancellation (logged with the event).",
+                    },
+                },
+                "required": ["memory_id"],
                 "additionalProperties": False,
             },
         },
@@ -248,14 +314,13 @@ def send_message_to_agent(
     task_name: str | None = None,
 ) -> ToolResult:
     """Send instructions to an execution worker using a memory context."""
-    gmail_error = _gmail_preflight_error(instructions=instructions, task_name=task_name)
-    if gmail_error:
-        get_conversation_log().record_reply(gmail_error)
+    google_error = _google_preflight_error(
+        instructions=instructions, task_name=task_name
+    )
+    if google_error:
         return ToolResult(
             success=False,
-            payload={"error": gmail_error, "status": "not_submitted"},
-            user_message=gmail_error,
-            recorded_reply=True,
+            payload={"error": google_error, "status": "not_submitted"},
         )
 
     memory_store = get_memory_store()
@@ -317,18 +382,61 @@ def send_message_to_agent(
     )
 
 
-def _gmail_preflight_error(
+_GOOGLE_INTENT_TERMS: tuple[str, ...] = (
+    # Gmail
+    "gmail",
+    "email",
+    "emails",
+    "inbox",
+    "mail",
+    "mailbox",
+    "reply",
+    "forward",
+    "draft",
+    # Calendar
+    "calendar",
+    "gcal",
+    "schedule",
+    "meeting",
+    "event",
+    "invite",
+    "availability",
+    # Drive / Docs / Sheets / Slides
+    "drive",
+    "doc",
+    "docs",
+    "document",
+    "sheet",
+    "sheets",
+    "spreadsheet",
+    "slides",
+    "presentation",
+    # Contacts
+    "contact",
+    "contacts",
+    # Catch-all
+    "google",
+)
+
+
+def _google_preflight_error(
     *, instructions: str, task_name: str | None = None
 ) -> str | None:
+    """Return a connect-google error if the request needs Google but none is connected.
+
+    Triggers on any Google-service keyword (gmail, calendar, drive, docs, contacts,
+    or a bare "google" mention). The frontend matches the canned text to surface
+    the inline Connect Google button — see
+    apps/web/src/features/assistant/components/catalog/components/integrations/utils.ts.
+    """
     text = f"{task_name or ''} {instructions or ''}".lower()
-    gmail_terms = ("gmail", "email", "emails", "inbox")
-    if not any(term in text for term in gmail_terms):
+    if not any(term in text for term in _GOOGLE_INTENT_TERMS):
         return None
-    if get_active_gmail_user_id():
+    if resolve_workspace_gmail_user_id():
         return None
     return (
-        "Gmail is not currently connected to your account. Please connect Gmail in "
-        "settings first, then I can help with Gmail."
+        "Google is not currently connected to your account. Please connect Google "
+        "in settings first, then I can help."
     )
 
 
@@ -387,20 +495,17 @@ def send_messages_to_agents(
                 success=False,
                 payload={"error": f"Item {index} is missing task_name"},
             )
-        gmail_error = _gmail_preflight_error(
+        google_error = _google_preflight_error(
             instructions=instructions, task_name=task_name
         )
-        if gmail_error:
-            get_conversation_log().record_reply(gmail_error)
+        if google_error:
             return ToolResult(
                 success=False,
                 payload={
-                    "error": gmail_error,
+                    "error": google_error,
                     "status": "not_submitted",
                     "item": index,
                 },
-                user_message=gmail_error,
-                recorded_reply=True,
             )
 
         if item_memory_id:
@@ -534,6 +639,11 @@ def _record_and_submit_execution(
     task = loop.create_task(_execute_async())
     _running_tasks.add(task)
     task.add_done_callback(_running_tasks.discard)
+    # Register with the task registry so cancel_execution can target this
+    # request_id later. Done callbacks are independent — both fire.
+    from ..execution_agent.task_registry import get_task_registry
+
+    get_task_registry().register(request_id, task)
     return ToolResult(success=True, payload={"status": "submitted"})
 
 
@@ -556,10 +666,7 @@ def _find_active_execution_run(
         parts = run["parts"]
         submitted_text = ""
         for part in parts:
-            if (
-                part["type"] == "status"
-                and part["state"] == "queued"
-            ):
+            if part["type"] == "status" and part["state"] == "queued":
                 submitted_text = str(part["text"] or "")
                 break
         normalized_submitted = _normalize_task_text(submitted_text)
@@ -618,18 +725,23 @@ def send_message_to_user(message: str) -> ToolResult:
     )
 
 
-# Format and record email draft for user review
+# Register an email draft for the UI without producing user-visible chat text
 def send_draft(
     to: str,
     subject: str,
     body: str,
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+    extra_recipients: list[str] | None = None,
+    is_html: bool | None = None,
+    thread_id: str | None = None,
+    draft_id: str | None = None,
+    attachment: _DraftAttachmentArgs | None = None,
 ) -> ToolResult:
-    """Record a draft update in the conversation log for the interaction agent."""
+    """Register a draft in transcript-only memory; the UI renders it from tool-call args."""
     log = get_conversation_log()
 
-    message = f"To: {to}\nSubject: {subject}\n\n{body}"
-
-    log.record_reply(message)
+    log.record_draft(to, subject, body)
     logger.info(f"Draft recorded for: {to}")
 
     return ToolResult(
@@ -638,9 +750,14 @@ def send_draft(
             "status": "draft_recorded",
             "to": to,
             "subject": subject,
+            "cc": cc or [],
+            "bcc": bcc or [],
+            "extra_recipients": extra_recipients or [],
+            "is_html": is_html,
+            "thread_id": thread_id,
+            "draft_id": draft_id,
+            "attachment": attachment,
         },
-        user_message=message,
-        recorded_reply=True,
     )
 
 
@@ -659,6 +776,136 @@ def wait(reason: str) -> ToolResult:
             "reason": reason,
         },
         recorded_reply=True,
+    )
+
+
+def send_followup_to_agent(memory_id: str, message: str) -> ToolResult:
+    """Push a follow-up message to a running execution agent's inbox.
+
+    Used for non-destructive refinement (extra constraint, clarification)
+    of an already-running task. The execution-agent loop drains its inbox
+    at iteration boundaries and treats messages as user follow-ups.
+
+    Returns:
+        - {"status": "dispatched", "request_ids": [...], "count": N}
+          when at least one live task received the follow-up
+        - {"status": "too_late", "memory_id": ...}
+          when no live task matched
+    """
+    from ..execution_agent.task_registry import get_task_registry
+
+    store = get_execution_event_store()
+    registry = get_task_registry()
+
+    active: list[str] = []
+    for run in store.list_runs(limit=100):
+        if run.get("memoryId") != memory_id:
+            continue
+        if run.get("status") in {"completed", "failed"}:
+            continue
+        request_id = str(run.get("requestId") or "")
+        if request_id and registry.has(request_id):
+            active.append(request_id)
+
+    if not active:
+        return ToolResult(
+            success=True,
+            payload={
+                "status": "too_late",
+                "memory_id": memory_id,
+                "message": (
+                    "No in-flight task found for that memory_id — it may have "
+                    "already finished. If the user's amendment is still "
+                    "relevant, dispatch it as a new send_message_to_agent."
+                ),
+            },
+        )
+
+    dispatched: list[str] = []
+    for request_id in active:
+        if registry.push_followup(request_id, message):
+            dispatched.append(request_id)
+            store.record_event(
+                request_id=request_id,
+                memory_id=memory_id,
+                event_type="status",
+                state="running",
+                text=f"follow-up dispatched: {message}",
+            )
+
+    return ToolResult(
+        success=True,
+        payload={
+            "status": "dispatched" if dispatched else "too_late",
+            "memory_id": memory_id,
+            "request_ids": dispatched,
+            "count": len(dispatched),
+        },
+    )
+
+
+def cancel_execution(memory_id: str, reason: str = "") -> ToolResult:
+    """Stop an in-flight execution by memory_id.
+
+    Resolves memory_id to one or more active request_ids via the execution
+    event store, then asks the task registry to cancel each matching task.
+    The actual cancellation flows asynchronously: the execution runtime
+    catches CancelledError, records a terminal run.failed event with
+    text=cancelled, and the SSE pipelines surface that to the UI.
+
+    Returns:
+        - {"status": "cancelled", "request_ids": [...], "count": N}
+          when at least one live task was signalled
+        - {"status": "too_late", "memory_id": ...}
+          when no live task matched (either unknown memory_id, or all runs
+          for that memory had already finished)
+    """
+    from ..execution_agent.task_registry import get_task_registry
+
+    store = get_execution_event_store()
+    registry = get_task_registry()
+
+    # Find non-terminal runs for this memory_id. Limited to recent runs to
+    # avoid pathological scans on long-lived memories.
+    active: list[str] = []
+    for run in store.list_runs(limit=100):
+        if run.get("memoryId") != memory_id:
+            continue
+        if run.get("status") in {"completed", "failed"}:
+            continue
+        request_id = str(run.get("requestId") or "")
+        if request_id and registry.has(request_id):
+            active.append(request_id)
+
+    if not active:
+        return ToolResult(
+            success=True,
+            payload={
+                "status": "too_late",
+                "memory_id": memory_id,
+                "reason": reason,
+                "message": (
+                    "No in-flight task found for that memory_id — it may have "
+                    "already finished. Check the latest result before assuming "
+                    "the work didn't happen."
+                ),
+            },
+        )
+
+    cancelled: list[str] = []
+    for request_id in active:
+        if registry.cancel(request_id):
+            cancelled.append(request_id)
+
+    return ToolResult(
+        success=True,
+        payload={
+            "status": "cancelled" if cancelled else "too_late",
+            "memory_id": memory_id,
+            "request_ids": cancelled,
+            "count": len(cancelled),
+            "reason": reason,
+        },
     )
 
 
@@ -716,12 +963,34 @@ def handle_tool_call(name: str, arguments: object) -> ToolResult:
             error = _validate_required(args, {"to": str, "subject": str, "body": str})
             if error:
                 return error
+            for field in ("cc", "bcc", "extra_recipients"):
+                if field in args and args[field] is not None and not isinstance(args[field], list):
+                    return _invalid_argument(field)
+            if "is_html" in args and args["is_html"] is not None and not isinstance(args["is_html"], bool):
+                return _invalid_argument("is_html")
+            for field in ("thread_id", "draft_id"):
+                if field in args and args[field] is not None and not isinstance(args[field], str):
+                    return _invalid_argument(field)
+            if "attachment" in args and args["attachment"] is not None and not isinstance(args["attachment"], dict):
+                return _invalid_argument("attachment")
             return send_draft(**cast(_SendDraftArgs, cast(object, args)))
         if name == "wait":
             error = _validate_required(args, {"reason": str})
             if error:
                 return error
             return wait(**cast(_WaitArgs, cast(object, args)))
+        if name == "cancel_execution":
+            error = _validate_required(args, {"memory_id": str})
+            if error:
+                return error
+            return cancel_execution(**cast(_CancelExecutionArgs, cast(object, args)))
+        if name == "send_followup_to_agent":
+            error = _validate_required(args, {"memory_id": str, "message": str})
+            if error:
+                return error
+            return send_followup_to_agent(
+                **cast(_SendFollowupArgs, cast(object, args))
+            )
 
         logger.warning("unexpected tool", extra={"tool": name})
         return ToolResult(success=False, payload={"error": f"Unknown tool: {name}"})

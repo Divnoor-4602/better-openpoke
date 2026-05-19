@@ -22,6 +22,8 @@ export const zAgentRunEventResource = z.object({
     id: z.int().nullable(),
     input: z.unknown().nullish(),
     output: z.unknown().nullish(),
+    runId: z.string(),
+    sequence: z.int(),
     state: z.string().nullish(),
     text: z.string().nullish(),
     toolCallId: z.string().nullish(),
@@ -37,8 +39,11 @@ export const zAgentRunResource = z.object({
     memoryId: z.string(),
     ok: z.boolean().nullish(),
     parentMemoryId: z.string().nullish(),
+    parentRunId: z.string().nullish(),
     parts: z.array(zAgentRunEventResource).optional(),
     requestId: z.string(),
+    runId: z.string(),
+    scope: z.enum(['interaction', 'execution']).optional().default('execution'),
     status: z.enum([
         'queued',
         'running',
@@ -55,6 +60,34 @@ export const zAgentRunResource = z.object({
  */
 export const zAgentRunResponse = z.object({
     run: zAgentRunResource
+});
+
+/**
+ * CalendarEventDiscardResponse
+ */
+export const zCalendarEventDiscardResponse = z.object({
+    ok: z.boolean().optional().default(true),
+    status: z.literal('discarded').optional().default('discarded')
+});
+
+/**
+ * CalendarEventUpdateRequest
+ *
+ * Flat partial — all fields optional. Server omits ``None`` when
+ * building the Composio payload so unset fields are never cleared.
+ */
+export const zCalendarEventUpdateRequest = z.object({
+    attendees: z.array(z.string()).nullish(),
+    description: z.string().nullish(),
+    summary: z.string().nullish()
+});
+
+/**
+ * CalendarEventUpdateResponse
+ */
+export const zCalendarEventUpdateResponse = z.object({
+    eventId: z.string(),
+    ok: z.boolean().optional().default(true)
 });
 
 /**
@@ -77,6 +110,46 @@ export const zAgentRunListResponse = z.object({
  * DeleteResponse
  */
 export const zDeleteResponse = z.object({
+    ok: z.boolean().optional().default(true)
+});
+
+/**
+ * DraftDiscardResponse
+ */
+export const zDraftDiscardResponse = z.object({
+    ok: z.boolean().optional().default(true),
+    status: z.literal('discarded').optional().default('discarded')
+});
+
+/**
+ * DraftSendResponse
+ */
+export const zDraftSendResponse = z.object({
+    messageId: z.string().nullish(),
+    ok: z.boolean().optional().default(true),
+    status: z.literal('sent').optional().default('sent'),
+    threadId: z.string().nullish()
+});
+
+/**
+ * DraftUpdateRequest
+ *
+ * Flat partial — all fields optional. Server omits ``None`` when building
+ * the Composio ``message`` payload so unset fields are never cleared.
+ */
+export const zDraftUpdateRequest = z.object({
+    bcc: z.array(z.string()).nullish(),
+    body: z.string().nullish(),
+    cc: z.array(z.string()).nullish(),
+    subject: z.string().nullish(),
+    to: z.string().nullish()
+});
+
+/**
+ * DraftUpdateResponse
+ */
+export const zDraftUpdateResponse = z.object({
+    draftId: z.string(),
     ok: z.boolean().optional().default(true)
 });
 
@@ -111,6 +184,7 @@ export const zHealthResponse = z.object({
  */
 export const zIntegrationConnectRequest = z.object({
     authConfigId: z.string().nullish(),
+    returnTo: z.string().nullish(),
     userId: z.string().nullish()
 });
 
@@ -166,6 +240,21 @@ export const zIntegrationStatusResponse = z.object({
 });
 
 /**
+ * MeResponse
+ */
+export const zMeResponse = z.object({
+    workspaceId: z.string()
+});
+
+/**
+ * ResetResponse
+ */
+export const zResetResponse = z.object({
+    cleared: z.array(z.string()),
+    ok: z.boolean()
+});
+
+/**
  * TextUIPart
  */
 export const zTextUiPart = z.object({
@@ -188,7 +277,8 @@ export const zMessageResource = z.object({
         'tool',
         'data'
     ]),
-    threadId: z.string()
+    threadId: z.string(),
+    turnIndex: z.int().optional().default(0)
 });
 
 /**
@@ -212,7 +302,7 @@ export const zMessageListResponse = z.object({
 export const zThreadResource = z.object({
     createdAt: z.string(),
     threadId: z.string(),
-    title: z.string(),
+    title: z.string().nullish(),
     updatedAt: z.string()
 });
 
@@ -246,6 +336,21 @@ export const zThreadUpdateRequest = z.object({
 });
 
 /**
+ * TimezoneResponse
+ */
+export const zTimezoneResponse = z.object({
+    ok: z.boolean().optional().default(true),
+    timezone: z.string()
+});
+
+/**
+ * TimezoneSetRequest
+ */
+export const zTimezoneSetRequest = z.object({
+    timezone: z.string().min(1)
+});
+
+/**
  * UIMessage
  */
 export const zUiMessage = z.object({
@@ -272,8 +377,35 @@ export const zMessageCreateRequest = z.object({
  * MessageStreamRequest
  */
 export const zMessageStreamRequest = z.object({
-    messages: z.array(zUiMessage).min(1)
+    messages: z.array(zUiMessage).min(1),
+    notifications: z.enum([
+        'granted',
+        'default',
+        'denied'
+    ]).nullish(),
+    timezone: z.string().min(1).nullish()
 });
+
+/**
+ * WorkspaceListEntry
+ */
+export const zWorkspaceListEntry = z.object({
+    firstIp: z.string().nullish(),
+    firstSeenAt: z.string(),
+    workspaceId: z.string()
+});
+
+/**
+ * WorkspaceListResponse
+ */
+export const zWorkspaceListResponse = z.object({
+    items: z.array(zWorkspaceListEntry)
+});
+
+/**
+ * Successful Response
+ */
+export const zListWorkspacesResponse = zWorkspaceListResponse;
 
 export const zListAgentRunsQuery = z.object({
     cursor: z.string().nullish(),
@@ -302,6 +434,60 @@ export const zStreamAgentRunEventsQuery = z.object({
     afterId: z.int().gte(0).optional().default(0)
 });
 
+export const zDiscardCalendarEventPath = z.object({
+    event_id: z.string()
+});
+
+/**
+ * Successful Response
+ */
+export const zDiscardCalendarEventResponse = zCalendarEventDiscardResponse;
+
+export const zUpdateCalendarEventBody = zCalendarEventUpdateRequest;
+
+export const zUpdateCalendarEventPath = z.object({
+    event_id: z.string()
+});
+
+/**
+ * Successful Response
+ */
+export const zUpdateCalendarEventResponse = zCalendarEventUpdateResponse;
+
+/**
+ * Successful Response
+ */
+export const zDevResetResponse = zResetResponse;
+
+export const zDiscardGmailDraftPath = z.object({
+    draft_id: z.string()
+});
+
+/**
+ * Successful Response
+ */
+export const zDiscardGmailDraftResponse = zDraftDiscardResponse;
+
+export const zUpdateGmailDraftBody = zDraftUpdateRequest;
+
+export const zUpdateGmailDraftPath = z.object({
+    draft_id: z.string()
+});
+
+/**
+ * Successful Response
+ */
+export const zUpdateGmailDraftResponse = zDraftUpdateResponse;
+
+export const zSendGmailDraftPath = z.object({
+    draft_id: z.string()
+});
+
+/**
+ * Successful Response
+ */
+export const zSendGmailDraftResponse = zDraftSendResponse;
+
 /**
  * Successful Response
  */
@@ -310,7 +496,7 @@ export const zRetrieveHealthResponse = zHealthResponse;
 export const zConnectIntegrationBody = zIntegrationConnectRequest;
 
 export const zConnectIntegrationPath = z.object({
-    provider: z.literal('gmail')
+    provider: z.literal('google')
 });
 
 /**
@@ -321,7 +507,7 @@ export const zConnectIntegrationResponse = zIntegrationConnectResponse;
 export const zDisconnectIntegrationBody = zIntegrationDisconnectRequest;
 
 export const zDisconnectIntegrationPath = z.object({
-    provider: z.literal('gmail')
+    provider: z.literal('google')
 });
 
 /**
@@ -332,13 +518,30 @@ export const zDisconnectIntegrationResponse = zIntegrationDisconnectResponse;
 export const zRetrieveIntegrationStatusBody = zIntegrationStatusRequest;
 
 export const zRetrieveIntegrationStatusPath = z.object({
-    provider: z.literal('gmail')
+    provider: z.literal('google')
 });
 
 /**
  * Successful Response
  */
 export const zRetrieveIntegrationStatusResponse = zIntegrationStatusResponse;
+
+/**
+ * Successful Response
+ */
+export const zRetrieveMeResponse = zMeResponse;
+
+/**
+ * Successful Response
+ */
+export const zRetrieveTimezoneResponse = zTimezoneResponse;
+
+export const zSetTimezoneBody = zTimezoneSetRequest;
+
+/**
+ * Successful Response
+ */
+export const zSetTimezoneResponse = zTimezoneResponse;
 
 export const zListThreadsQuery = z.object({
     cursor: z.string().nullish(),
@@ -439,3 +642,12 @@ export const zStreamThreadMessageBody = zMessageStreamRequest;
 export const zStreamThreadMessagePath = z.object({
     threadId: z.string()
 });
+
+export const zGenerateThreadTitlePath = z.object({
+    threadId: z.string()
+});
+
+/**
+ * Successful Response
+ */
+export const zGenerateThreadTitleResponse = zThreadResponse;

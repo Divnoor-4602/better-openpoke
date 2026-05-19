@@ -1,0 +1,152 @@
+{
+  "calendar_create_event": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "attendees": {
+        "description": "Email addresses of attendees to invite.",
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "calendar_id": {
+        "description": "Calendar identifier, defaults to 'primary'.",
+        "type": "string"
+      },
+      "create_meeting_room": {
+        "description": "Attach a Google Meet conference link to the event.",
+        "type": "boolean"
+      },
+      "description": {
+        "description": "Event description / body.",
+        "type": "string"
+      },
+      "end_datetime": {
+        "type": "string",
+        "description": "Event end (RFC3339)."
+      },
+      "event_id": {
+        "description": "Created Google Calendar event id, when available.",
+        "type": "string"
+      },
+      "meet_link": {
+        "description": "Google Meet URL (Google Calendar `hangoutLink`) when one is attached to the event. Populated from the create/patch response, not from the LLM input.",
+        "type": "string"
+      },
+      "force_overlap": {
+        "description": "Server-side override: skip the freebusy precheck and create the event even if it overlaps an existing one. Set true ONLY after the user has explicitly confirmed scheduling despite a known conflict. The UI ignores this field.",
+        "type": "boolean"
+      },
+      "location": {
+        "description": "Physical or virtual location text.",
+        "type": "string"
+      },
+      "recurrence": {
+        "description": "RRULE / EXRULE / RDATE / EXDATE lines per RFC 5545 for recurring events. Examples: [\"RRULE:FREQ=DAILY\"] (daily), [\"RRULE:FREQ=WEEKLY;BYDAY=TU\"] (weekly on Tue), [\"RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR\"] (weekdays), [\"RRULE:FREQ=MONTHLY;BYDAY=1MO\"] (first Mon of each month), [\"RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20260901T000000Z\"] (weekly until Sep 1). Omit for one-off events.",
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "send_updates": {
+        "description": "Notification policy: 'all', 'externalOnly', or 'none'.",
+        "type": "string"
+      },
+      "start_datetime": {
+        "type": "string",
+        "description": "Event start (RFC3339, e.g. 2025-06-01T15:00:00-07:00)."
+      },
+      "summary": {
+        "type": "string",
+        "description": "Event title."
+      },
+      "timezone": {
+        "description": "IANA timezone, e.g. 'America/Los_Angeles'.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "end_datetime",
+      "start_datetime",
+      "summary"
+    ],
+    "additionalProperties": false
+  },
+  "send_draft": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "attachment": {
+        "description": "Single attachment metadata for the draft.",
+        "type": "object",
+        "properties": {
+          "mimetype": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "s3key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "bcc": {
+        "description": "Optional BCC recipient emails.",
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "body": {
+        "type": "string",
+        "description": "Email body content (plain text)."
+      },
+      "cc": {
+        "description": "Optional CC recipient emails.",
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "draft_id": {
+        "description": "Created Gmail draft id, when available.",
+        "type": "string"
+      },
+      "extra_recipients": {
+        "description": "Additional primary recipient emails.",
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "is_html": {
+        "description": "True when the body contains HTML content.",
+        "type": "boolean"
+      },
+      "subject": {
+        "type": "string",
+        "description": "Email subject for the draft."
+      },
+      "thread_id": {
+        "description": "Existing Gmail thread id when this draft belongs to a thread.",
+        "type": "string"
+      },
+      "to": {
+        "type": "string",
+        "description": "Recipient email for the draft."
+      }
+    },
+    "required": [
+      "body",
+      "subject",
+      "to"
+    ],
+    "additionalProperties": false
+  }
+}

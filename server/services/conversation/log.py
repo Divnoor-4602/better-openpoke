@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import threading
 from collections.abc import Iterator
@@ -8,6 +9,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from ...config import get_settings
+from ...core.paths import get_data_dir
+from ...core.workspace_context import require_current_workspace
 from ...logging_config import logger
 from ...models import ChatMessage
 from ...utils.timezones import now_in_user_timezone
@@ -16,8 +19,12 @@ if TYPE_CHECKING:  # pragma: no cover - used for type checkers only
     from .summarization.working_memory_log import WorkingMemoryLog
 
 
-_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
-_CONVERSATION_LOG_PATH = _DATA_DIR / "conversation" / "poke_conversation.log"
+_DATA_DIR = get_data_dir()
+_CONVERSATION_DIR = _DATA_DIR / "conversation"
+
+
+def _conversation_log_path(workspace_id: str) -> Path:
+    return _CONVERSATION_DIR / workspace_id / "poke_conversation.log"
 
 
 class TranscriptFormatter(Protocol):
@@ -40,10 +47,10 @@ def _default_formatter(tag: str, timestamp: str, payload: str) -> str:
     return f"<{tag} timestamp=\"{timestamp}\">{encoded}</{tag}>\n"
 
 
-def _resolve_working_memory_log() -> "WorkingMemoryLog":
+def _resolve_working_memory_log(workspace_id: str) -> "WorkingMemoryLog":
     from .summarization.working_memory_log import get_working_memory_log
 
-    return get_working_memory_log()
+    return get_working_memory_log(workspace_id)
 
 
 _ATTR_PATTERN = re.compile(r"(\w+)\s*=\s*\"([^\"]*)\"")
@@ -52,12 +59,20 @@ _ATTR_PATTERN = re.compile(r"(\w+)\s*=\s*\"([^\"]*)\"")
 class ConversationLog:
     """Append-only conversation log persisted to disk for the interaction agent."""
 
-    def __init__(self, path: Path, formatter: TranscriptFormatter = _default_formatter):
+    def __init__(
+        self,
+        path: Path,
+        workspace_id: str,
+        formatter: TranscriptFormatter = _default_formatter,
+    ):
         self._path: Path = path
+        self._workspace_id: str = workspace_id
         self._formatter: TranscriptFormatter = formatter
         self._lock: threading.Lock = threading.Lock()
         self._ensure_directory()
-        self._working_memory_log: WorkingMemoryLog = _resolve_working_memory_log()
+        self._working_memory_log: WorkingMemoryLog = _resolve_working_memory_log(
+            workspace_id
+        )
 
     def _ensure_directory(self) -> None:
         try:
@@ -164,6 +179,46 @@ class ConversationLog:
         timestamp = self._append("wait", reason)
         self._working_memory_log.append_entry("wait", reason, timestamp)
 
+    def record_user_action(
+        self,
+        action: str,
+        summary: str,
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        """Record a manual UI action so the agent learns about it on the next turn.
+
+        Metadata-only: skipped in ``to_chat_messages`` so it never surfaces in
+        the user-facing chat view. The agent reads it from the same log that
+        feeds its prompt context.
+        """
+        body = json.dumps(
+            {"action": action, "summary": summary, "payload": payload or {}},
+            sort_keys=True,
+        )
+        timestamp = self._append("user_action", body)
+        self._working_memory_log.append_entry("user_action", body, timestamp)
+
+    def record_reminder_set(self, payload: str, fires_at: str) -> None:
+        """Record that the agent scheduled a reminder. Metadata-only — not surfaced in chat."""
+        body = f"fires_at={fires_at}\n\n{payload}"
+        timestamp = self._append("reminder_set", body)
+        self._working_memory_log.append_entry("reminder_set", body, timestamp)
+
+    def record_reminder_fired(self, payload: str) -> None:
+        """Record that a reminder just fired. Metadata-only — the user sees a browser notification."""
+        timestamp = self._append("reminder_fired", payload)
+        self._working_memory_log.append_entry("reminder_fired", payload, timestamp)
+
+    def record_draft(self, to: str, subject: str, body: str) -> None:
+        """Record a draft so the interaction agent retains cross-turn memory.
+
+        The user-facing chat view skips this tag; the UI renders the draft from
+        the originating ``send_draft`` tool-call args instead.
+        """
+        payload = f"to={to}\nsubject={subject}\n\n{body}"
+        timestamp = self._append("poke_draft", payload)
+        self._working_memory_log.append_entry("poke_draft", payload, timestamp)
+
     def _notify_summarization(self) -> None:
         settings = get_settings()
         if not settings.summarization_enabled:
@@ -179,11 +234,11 @@ class ConversationLog:
             return
 
         try:
-            schedule_summarization()
+            schedule_summarization(self._workspace_id)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning(
                 "failed to schedule summarization",
-                extra={"error": str(exc)},
+                extra={"error": str(exc), "workspace_id": self._workspace_id},
             )
 
     def to_chat_messages(self) -> list[ChatMessage]:
@@ -202,6 +257,12 @@ class ConversationLog:
                 )
             elif tag == "wait":
                 # Wait markers are orchestration metadata and must not surface to the user
+                continue
+            elif tag == "poke_draft":
+                # Drafts are surfaced via the send_draft tool-call UI, not chat text
+                continue
+            elif tag == "user_action":
+                # Manual UI actions are metadata for the agent, not user-visible chat
                 continue
         return messages
 
@@ -225,11 +286,37 @@ class ConversationLog:
             )
 
 
-_conversation_log = ConversationLog(_CONVERSATION_LOG_PATH)
+_cache: dict[str, ConversationLog] = {}
+_cache_lock = threading.Lock()
 
 
-def get_conversation_log() -> ConversationLog:
-    return _conversation_log
+def _resolve_workspace(workspace_id: str | None) -> str:
+    return workspace_id or require_current_workspace()
 
 
-__all__ = ["ConversationLog", "get_conversation_log"]
+def get_conversation_log(workspace_id: str | None = None) -> ConversationLog:
+    workspace_id = _resolve_workspace(workspace_id)
+    cached = _cache.get(workspace_id)
+    if cached is not None:
+        return cached
+    with _cache_lock:
+        cached = _cache.get(workspace_id)
+        if cached is None:
+            cached = ConversationLog(
+                _conversation_log_path(workspace_id), workspace_id
+            )
+            _cache[workspace_id] = cached
+        return cached
+
+
+def reset_conversation_log_cache() -> None:
+    """Test helper: drop the per-workspace cache."""
+    with _cache_lock:
+        _cache.clear()
+
+
+__all__ = [
+    "ConversationLog",
+    "get_conversation_log",
+    "reset_conversation_log_cache",
+]

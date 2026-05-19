@@ -8,6 +8,8 @@ import {
 } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 
+import { Toaster } from '@/components/ui/sonner'
+
 import TanStackQueryDevtools from '../lib/tanstack-query/devtools'
 import appCss from '../styles.css?url'
 
@@ -32,7 +34,7 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
         name: 'viewport',
       },
       {
-        title: 'TanStack Start Starter',
+        title: 'General Poke',
       },
     ],
   }),
@@ -47,6 +49,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         {children}
+        <Toaster closeButton position="bottom-right" />
         <TanStackDevtools
           config={{
             position: 'bottom-right',

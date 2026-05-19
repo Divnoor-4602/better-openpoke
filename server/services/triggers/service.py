@@ -22,15 +22,24 @@ from .utils import (
 MISSED_TRIGGER_GRACE_PERIOD = timedelta(minutes=5)
 
 
+from ...core.workspace_context import require_current_workspace
+
+
+def _resolve_workspace(workspace_id: str | None) -> str:
+    return workspace_id or require_current_workspace()
+
+
+
 class TriggerService:
     """High-level trigger management with recurrence awareness."""
 
     def __init__(self, store: TriggerStore):
-        self._store = store
+        self._store: TriggerStore = store
 
     def create_trigger(
         self,
         *,
+        workspace_id: str | None = None,
         agent_name: str,
         payload: str,
         recurrence_rule: str | None = None,
@@ -38,6 +47,7 @@ class TriggerService:
         timezone_name: str | None = None,
         status: str | None = None,
     ) -> TriggerRecord:
+        workspace_id = _resolve_workspace(workspace_id)
         tz = resolve_timezone(timezone_name)
         now = utc_now()
         start_dt_local = coerce_start_datetime(start_time, tz, now)
@@ -50,6 +60,7 @@ class TriggerService:
         )
         timestamp = to_storage_timestamp(now)
         record: dict[str, str | None] = {
+            "workspace_id": workspace_id,
             "agent_name": agent_name,
             "payload": payload,
             "start_time": to_storage_timestamp(start_dt_local),
@@ -62,7 +73,9 @@ class TriggerService:
             "updated_at": timestamp,
         }
         trigger_id = self._store.insert(record)
-        created = self._store.fetch_one(trigger_id, agent_name)
+        created = self._store.fetch_one(
+            trigger_id, agent_name, workspace_id=workspace_id
+        )
         if not created:  # pragma: no cover - defensive
             raise RuntimeError("Failed to load trigger after insert")
         return created
@@ -71,6 +84,7 @@ class TriggerService:
         self,
         trigger_id: int,
         *,
+        workspace_id: str | None = None,
         agent_name: str,
         payload: str | None = None,
         recurrence_rule: str | None = None,
@@ -80,7 +94,10 @@ class TriggerService:
         last_error: str | None = None,
         clear_error: bool = False,
     ) -> TriggerRecord | None:
-        existing = self._store.fetch_one(trigger_id, agent_name)
+        workspace_id = _resolve_workspace(workspace_id)
+        existing = self._store.fetch_one(
+            trigger_id, agent_name, workspace_id=workspace_id
+        )
         if existing is None:
             return None
 
@@ -176,20 +193,50 @@ class TriggerService:
         if not fields:
             return existing
 
-        updated = self._store.update(trigger_id, agent_name, fields)
-        return self._store.fetch_one(trigger_id, agent_name) if updated else existing
+        updated = self._store.update(
+            trigger_id, agent_name, fields, workspace_id=workspace_id
+        )
+        return (
+            self._store.fetch_one(
+                trigger_id, agent_name, workspace_id=workspace_id
+            )
+            if updated
+            else existing
+        )
 
-    def list_triggers(self, *, agent_name: str) -> list[TriggerRecord]:
-        return self._store.list_for_agent(agent_name)
+    def list_triggers(
+        self, *, workspace_id: str | None = None, agent_name: str
+    ) -> list[TriggerRecord]:
+        workspace_id = _resolve_workspace(workspace_id)
+        return self._store.list_for_agent(agent_name, workspace_id=workspace_id)
 
     def get_due_triggers(
-        self, *, before: datetime, agent_name: str | None = None
+        self,
+        *,
+        before: datetime,
+        agent_name: str | None = None,
+        workspace_id: str | None = None,
     ) -> list[TriggerRecord]:
-        iso_cutoff = to_storage_timestamp(before)
-        return self._store.fetch_due(agent_name, iso_cutoff)
+        """Fetch due triggers.
 
-    def mark_as_completed(self, trigger_id: int, *, agent_name: str) -> None:
-        self._store.update(
+        Unlike the other workspace-scoped methods, this one preserves
+        `workspace_id=None` as "scan every workspace" — the trigger
+        scheduler polls cross-workspace and then dispatches each result
+        under its own workspace. Don't resolve from the ContextVar here.
+        """
+        iso_cutoff = to_storage_timestamp(before)
+        return self._store.fetch_due(
+            agent_name, iso_cutoff, workspace_id=workspace_id
+        )
+
+    def list_workspaces(self) -> list[str]:
+        return self._store.list_workspaces()
+
+    def mark_as_completed(
+        self, trigger_id: int, *, agent_name: str, workspace_id: str | None = None
+    ) -> None:
+        workspace_id = _resolve_workspace(workspace_id)
+        _ = self._store.update(
             trigger_id,
             agent_name,
             {
@@ -197,6 +244,7 @@ class TriggerService:
                 "next_trigger": None,
                 "last_error": None,
             },
+            workspace_id=workspace_id,
         )
 
     def schedule_next_occurrence(
@@ -206,8 +254,16 @@ class TriggerService:
         fired_at: datetime,
     ) -> TriggerRecord | None:
         if not trigger.recurrence_rule:
-            self.mark_as_completed(trigger.id, agent_name=trigger.agent_name)
-            return self._store.fetch_one(trigger.id, trigger.agent_name)
+            self.mark_as_completed(
+                trigger.id,
+                agent_name=trigger.agent_name,
+                workspace_id=trigger.workspace_id,
+            )
+            return self._store.fetch_one(
+                trigger.id,
+                trigger.agent_name,
+                workspace_id=trigger.workspace_id,
+            )
 
         tz = resolve_timezone(trigger.timezone)
         next_fire = self._compute_next_after(trigger.recurrence_rule, fired_at, tz)
@@ -217,32 +273,44 @@ class TriggerService:
         }
         if next_fire is None:
             fields["status"] = "completed"
-        self._store.update(trigger.id, trigger.agent_name, fields)
-        return self._store.fetch_one(trigger.id, trigger.agent_name)
+        _ = self._store.update(
+            trigger.id, trigger.agent_name, fields, workspace_id=trigger.workspace_id
+        )
+        return self._store.fetch_one(
+            trigger.id, trigger.agent_name, workspace_id=trigger.workspace_id
+        )
 
     def record_failure(self, trigger: TriggerRecord, error: str) -> None:
-        self._store.update(
+        _ = self._store.update(
             trigger.id,
             trigger.agent_name,
             {
                 "last_error": error,
             },
+            workspace_id=trigger.workspace_id,
         )
 
     def clear_next_fire(
-        self, trigger_id: int, *, agent_name: str
+        self, trigger_id: int, *, agent_name: str, workspace_id: str | None = None
     ) -> TriggerRecord | None:
-        self._store.update(
+        workspace_id = _resolve_workspace(workspace_id)
+        _ = self._store.update(
             trigger_id,
             agent_name,
             {
                 "next_trigger": None,
             },
+            workspace_id=workspace_id,
         )
-        return self._store.fetch_one(trigger_id, agent_name)
+        return self._store.fetch_one(
+            trigger_id, agent_name, workspace_id=workspace_id
+        )
 
     def clear_all(self) -> None:
         self._store.clear_all()
+
+    def clear_workspace(self, workspace_id: str) -> None:
+        self._store.clear_workspace(workspace_id)
 
     def _compute_next_fire(
         self,

@@ -21,7 +21,15 @@ class _ConversationLogReader(Protocol):
         ...
 
 
-def _resolve_conversation_log() -> "ConversationLog":
+def _resolve_conversation_log(workspace_id: str) -> "ConversationLog":
+    module = import_module("server.services.conversation.log")
+    get_log = cast(
+        "Callable[[str], ConversationLog]", getattr(module, "get_conversation_log")
+    )
+    return get_log(workspace_id)
+
+
+def _resolve_conversation_log_from_context() -> "ConversationLog":
     module = import_module("server.services.conversation.log")
     get_log = cast("Callable[[], ConversationLog]", getattr(module, "get_conversation_log"))
     return get_log()
@@ -77,13 +85,13 @@ async def _call_openrouter(prompt: SummaryPrompt, model: str, api_key: str | Non
     raise OpenRouterError("Conversation summarization failed")
 
 
-async def summarize_conversation() -> bool:
+async def summarize_conversation(workspace_id: str | None = None) -> bool:
     settings = get_settings()
     if not settings.summarization_enabled:
         return False
 
-    conversation_log = _resolve_conversation_log()
-    working_memory_log = get_working_memory_log()
+    conversation_log = _resolve_conversation_log(workspace_id) if workspace_id else _resolve_conversation_log_from_context()
+    working_memory_log = get_working_memory_log(workspace_id) if workspace_id else get_working_memory_log()
 
     entries = _collect_entries(conversation_log)
     state = working_memory_log.load_summary_state()

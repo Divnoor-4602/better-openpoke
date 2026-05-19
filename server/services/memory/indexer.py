@@ -1,25 +1,63 @@
 """Pinecone indexing helpers for memory records and events."""
-# pyright: reportAny=false, reportExplicitAny=false, reportUnknownArgumentType=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnannotatedClassAttribute=false, reportUnusedCallResult=false, reportUnusedFunction=false
 
 from __future__ import annotations
 
 import asyncio
 import json
 import sqlite3
-from contextlib import closing
 from collections.abc import Iterable, Mapping
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from os import PathLike
 from time import perf_counter
-from typing import Any, TypeAlias, cast
+from typing import Any, Protocol, TypeAlias, cast
 
 from ...config import get_settings
+from ...core.sqlite_row import SqliteRow
 from ...logging_config import logger
 
 DENSE_EMBED_MODEL = "llama-text-embed-v2"
 SPARSE_EMBED_MODEL = "pinecone-sparse-english-v0"
 SQLitePath: TypeAlias = str | bytes | PathLike[str] | PathLike[bytes]
+
+
+def _row(value: Any) -> SqliteRow | None:  # pyright: ignore[reportExplicitAny, reportAny]
+    if value is None:
+        return None
+    return cast(SqliteRow, cast(object, value))
+
+
+def _rows(values: Any) -> list[SqliteRow]:  # pyright: ignore[reportExplicitAny, reportAny]
+    return cast("list[SqliteRow]", cast(object, values))
+
+
+class _PineconeIndex(Protocol):
+    def upsert(self, *, vectors: list[dict[str, object]], namespace: str) -> None: ...
+
+    def delete(
+        self,
+        *,
+        ids: list[str] | None = ...,
+        namespace: str,
+        delete_all: bool = ...,
+    ) -> None: ...
+
+
+class _PineconeInference(Protocol):
+    def embed(
+        self,
+        *,
+        model: str,
+        inputs: list[str],
+        parameters: dict[str, object],
+    ) -> list[Mapping[str, object]]: ...
+
+
+class _PineconeClient(Protocol):
+    inference: _PineconeInference
+
+    def Index(self, *, host: str) -> _PineconeIndex: ...  # noqa: N802 - SDK name
 
 
 @dataclass(frozen=True)
@@ -45,15 +83,15 @@ def pinecone_enabled() -> bool:
 def serialize_memory(
     conn: sqlite3.Connection, memory_id: str
 ) -> PineconeDocument | None:
-    row = conn.execute(
+    row = _row(conn.execute(
         "SELECT * FROM memories WHERE memory_id = ?",
         (memory_id,),
-    ).fetchone()
+    ).fetchone())
     if row is None:
         return None
 
     links = _links_for_memory(conn, memory_id)
-    latest_events = conn.execute(
+    latest_events = _rows(conn.execute(
         """
         SELECT * FROM events
         WHERE memory_id = ?
@@ -61,7 +99,7 @@ def serialize_memory(
         LIMIT 8
         """,
         (memory_id,),
-    ).fetchall()
+    ).fetchall())
     metadata = _load_json(row["metadata_json"])
     text_parts = [
         f"Memory title: {row['title']}",
@@ -91,10 +129,10 @@ def serialize_memory(
 
 
 def serialize_event(conn: sqlite3.Connection, event_id: str) -> PineconeDocument | None:
-    row = conn.execute(
+    row = _row(conn.execute(
         "SELECT * FROM events WHERE event_id = ?",
         (event_id,),
-    ).fetchone()
+    ).fetchone())
     if row is None:
         return None
 
@@ -131,6 +169,8 @@ def serialize_event(conn: sqlite3.Connection, event_id: str) -> PineconeDocument
 
 class MemoryIndexer:
     """Sync pending memory_index_queue rows into Pinecone."""
+
+    _db_path: SQLitePath
 
     def __init__(self, db_path: SQLitePath) -> None:
         self._db_path = db_path
@@ -178,7 +218,7 @@ class MemoryIndexer:
                         done_without_upsert.append(str(queue_row["id"]))
                         continue
                 except Exception as exc:  # pragma: no cover - external service failure
-                    _mark_failed(conn, queue_row["id"], str(exc))
+                    _mark_failed(conn, str(queue_row["id"]), str(exc))
                     logger.warning(
                         "Memory indexing serialization failed",
                         extra={
@@ -195,52 +235,84 @@ class MemoryIndexer:
             if done_without_upsert:
                 _mark_many_done(conn, done_without_upsert)
 
-            if delete_ids:
+            # Group deletes by workspace_id (same namespace-per-workspace policy).
+            deletes_by_workspace: dict[str, list[str]] = {}
+            delete_queues_by_workspace: dict[str, list[str]] = {}
+            for queue_row in rows:
+                if queue_row["operation"] != "delete":
+                    continue
+                vector_id = _vector_id_for_queue_row(queue_row)
+                if vector_id is None:
+                    continue
+                ws = str(queue_row["workspace_id"])
+                deletes_by_workspace.setdefault(ws, []).append(vector_id)
+                delete_queues_by_workspace.setdefault(ws, []).append(
+                    str(queue_row["id"])
+                )
+
+            for ws, ids in deletes_by_workspace.items():
+                queue_ids = delete_queues_by_workspace[ws]
                 try:
                     started = perf_counter()
-                    _delete_vectors(index, delete_ids)
-                    _mark_many_done(conn, delete_queue_ids)
-                    synced += len(delete_queue_ids)
-                    logger.info(
+                    _delete_vectors(index, ids, namespace=ws)
+                    _mark_many_done(conn, queue_ids)
+                    synced += len(queue_ids)
+                    logger.debug(
                         "Pinecone memory delete batch completed",
                         extra={
-                            "queue_rows": len(delete_queue_ids),
-                            "records": len(delete_ids),
+                            "workspace_id": ws,
+                            "queue_rows": len(queue_ids),
+                            "records": len(ids),
                             "delete_ms": _elapsed_ms(started),
                         },
                     )
                 except Exception as exc:  # pragma: no cover - external service failure
-                    _mark_many_failed(conn, delete_queue_ids, str(exc))
+                    _mark_many_failed(conn, queue_ids, str(exc))
                     logger.warning(
                         "Pinecone memory delete batch failed",
                         extra={
-                            "queue_rows": len(delete_queue_ids),
-                            "records": len(delete_ids),
+                            "workspace_id": ws,
+                            "queue_rows": len(queue_ids),
+                            "records": len(ids),
                             "error": str(exc),
                         },
                     )
 
-            documents = list(documents_by_id.values())
-            if documents:
+            # Group upserts by workspace_id so each batch hits its own
+            # Pinecone namespace.
+            workspace_for_doc: dict[str, str] = {}
+            for queue_row in rows:
+                if queue_row["operation"] != "upsert":
+                    continue
+                vector_id = _vector_id_for_queue_row(queue_row)
+                if vector_id is not None and vector_id in documents_by_id:
+                    workspace_for_doc[vector_id] = str(queue_row["workspace_id"])
+
+            docs_by_workspace: dict[str, list[PineconeDocument]] = {}
+            for doc_id, doc in documents_by_id.items():
+                ws = workspace_for_doc.get(doc_id)
+                if ws is None:
+                    continue
+                docs_by_workspace.setdefault(ws, []).append(doc)
+
+            for ws, docs in docs_by_workspace.items():
                 queue_ids = [
                     queue_id
-                    for doc_id in documents_by_id
-                    for queue_id in queue_ids_by_doc_id.get(doc_id, [])
+                    for doc in docs
+                    for queue_id in queue_ids_by_doc_id.get(doc.id, [])
                 ]
                 try:
                     started = perf_counter()
-                    vectors = _embed_documents(pc, documents)
+                    vectors = _embed_documents(pc, docs)
                     embed_ms = _elapsed_ms(started)
                     started = perf_counter()
-                    index.upsert(
-                        vectors=vectors,
-                        namespace=get_settings().pinecone_namespace,
-                    )
+                    index.upsert(vectors=vectors, namespace=ws)
                     _mark_many_done(conn, queue_ids)
                     synced += len(queue_ids)
-                    logger.info(
+                    logger.debug(
                         "Pinecone memory indexing batch completed",
                         extra={
+                            "workspace_id": ws,
                             "queue_rows": len(queue_ids),
                             "records": len(vectors),
                             "embed_ms": embed_ms,
@@ -252,8 +324,9 @@ class MemoryIndexer:
                     logger.warning(
                         "Pinecone memory indexing batch failed",
                         extra={
+                            "workspace_id": ws,
                             "queue_rows": len(queue_ids),
-                            "records": len(documents),
+                            "records": len(docs),
                             "error": str(exc),
                         },
                     )
@@ -266,7 +339,7 @@ class MemoryIndexer:
 
 
 def _document_for_queue_row(
-    conn: sqlite3.Connection, row: sqlite3.Row
+    conn: sqlite3.Connection, row: SqliteRow
 ) -> PineconeDocument | None:
     if row["operation"] != "upsert":
         return None
@@ -277,7 +350,7 @@ def _document_for_queue_row(
     return None
 
 
-def _vector_id_for_queue_row(row: sqlite3.Row) -> str | None:
+def _vector_id_for_queue_row(row: SqliteRow) -> str | None:
     if row["entity_type"] == "memory":
         return f"memory:{row['entity_id']}"
     if row["entity_type"] == "event":
@@ -285,7 +358,7 @@ def _vector_id_for_queue_row(row: sqlite3.Row) -> str | None:
     return None
 
 
-def _pinecone_index() -> tuple[Any, Any]:
+def _pinecone_index() -> tuple[_PineconeClient, _PineconeIndex]:
     from pinecone import Pinecone
 
     settings = get_settings()
@@ -294,15 +367,13 @@ def _pinecone_index() -> tuple[Any, Any]:
     if api_key is None or index_host is None:
         raise RuntimeError("Pinecone index is not configured")
 
-    pc = Pinecone(api_key=api_key)
+    pc = cast(_PineconeClient, cast(object, Pinecone(api_key=api_key)))
     return pc, pc.Index(host=index_host)
 
 
-def _embed_document(pc: Any, doc: PineconeDocument) -> dict[str, object]:
-    return _embed_documents(pc, [doc])[0]
-
-
-def _embed_documents(pc: Any, docs: list[PineconeDocument]) -> list[dict[str, object]]:
+def _embed_documents(
+    pc: _PineconeClient, docs: list[PineconeDocument]
+) -> list[dict[str, object]]:
     if not docs:
         return []
     texts = [doc.text for doc in docs]
@@ -319,7 +390,7 @@ def _embed_documents(pc: Any, docs: list[PineconeDocument]) -> list[dict[str, ob
         inputs=texts,
         parameters={"input_type": "passage", "truncate": "END"},
     )
-    logger.info(
+    logger.debug(
         "Pinecone memory embeddings completed",
         extra={
             "records": len(docs),
@@ -342,28 +413,88 @@ def _embed_documents(pc: Any, docs: list[PineconeDocument]) -> list[dict[str, ob
     return vectors
 
 
-def _delete_vectors(index: Any, ids: list[str]) -> None:
+def _is_pinecone_not_found(exc: BaseException) -> bool:
+    """Pinecone returns 404 when the namespace is empty / does not exist yet."""
+    name = type(exc).__name__
+    if name in {"NotFoundError", "PineconeNotFoundException"}:
+        return True
+    status_code = cast(object, getattr(exc, "status", None)) or cast(
+        object, getattr(exc, "status_code", None)
+    )
+    return status_code == 404
+
+
+def _delete_vectors(
+    index: _PineconeIndex, ids: list[str], *, namespace: str
+) -> None:
     if not ids:
         return
-    index.delete(ids=ids, namespace=get_settings().pinecone_namespace)
+    try:
+        index.delete(ids=ids, namespace=namespace)
+    except Exception as exc:
+        if _is_pinecone_not_found(exc):
+            # Namespace already empty (e.g. after a manual wipe) — treat as success.
+            logger.info(
+                "Pinecone delete skipped: namespace already empty",
+                extra={"ids": len(ids), "namespace": namespace},
+            )
+            return
+        raise
+
+
+def clear_pinecone_workspace(workspace_id: str) -> bool:
+    """Delete every vector in a single workspace's Pinecone namespace.
+
+    Returns True when a delete was issued (or the namespace was already empty),
+    False when Pinecone is not configured.
+    """
+    if not pinecone_enabled():
+        return False
+    _, index = _pinecone_index()
+    try:
+        index.delete(delete_all=True, namespace=workspace_id)
+    except Exception as exc:
+        if _is_pinecone_not_found(exc):
+            logger.info(
+                "Pinecone namespace already empty",
+                extra={"namespace": workspace_id},
+            )
+            return True
+        logger.exception(
+            "Pinecone namespace wipe failed", extra={"namespace": workspace_id}
+        )
+        raise
+    logger.info("Pinecone namespace wiped", extra={"namespace": workspace_id})
+    return True
+
+
+def clear_all_pinecone_namespaces(workspaces: Iterable[str]) -> int:
+    """Wipe every passed-in workspace namespace. Returns count of wipes attempted."""
+    count = 0
+    for workspace_id in workspaces:
+        if clear_pinecone_workspace(workspace_id):
+            count += 1
+    return count
 
 
 def _embedding_values(embedding: object) -> list[float]:
     if isinstance(embedding, Mapping):
-        return list(cast(Iterable[float], embedding["values"]))
-    return list(cast(Iterable[float], getattr(embedding, "values")))
+        embedding_map = cast(Mapping[str, object], embedding)
+        return list(cast(Iterable[float], embedding_map["values"]))
+    return list(cast(Iterable[float], cast(object, getattr(embedding, "values"))))
 
 
 def _sparse_values(embedding: object) -> dict[str, list[object]]:
     if isinstance(embedding, Mapping):
-        indices = embedding.get("sparse_indices") or embedding.get("indices")
-        values = embedding.get("sparse_values") or embedding.get("values")
+        embedding_map = cast(Mapping[str, object], embedding)
+        indices = embedding_map.get("sparse_indices") or embedding_map.get("indices")
+        values = embedding_map.get("sparse_values") or embedding_map.get("values")
     else:
-        indices = getattr(embedding, "sparse_indices", None) or getattr(
-            embedding, "indices"
+        indices = cast(object, getattr(embedding, "sparse_indices", None)) or cast(
+            object, getattr(embedding, "indices")
         )
-        values = getattr(embedding, "sparse_values", None) or getattr(
-            embedding, "values"
+        values = cast(object, getattr(embedding, "sparse_values", None)) or cast(
+            object, getattr(embedding, "values")
         )
     return {
         "indices": list(cast(Iterable[object], indices)),
@@ -371,26 +502,30 @@ def _sparse_values(embedding: object) -> dict[str, list[object]]:
     }
 
 
-def _links_for_memory(conn: sqlite3.Connection, memory_id: str) -> list[sqlite3.Row]:
-    return conn.execute(
+def _links_for_memory(
+    conn: sqlite3.Connection, memory_id: str
+) -> list[SqliteRow]:
+    return _rows(conn.execute(
         "SELECT * FROM links WHERE memory_id = ? ORDER BY created_at DESC",
         (memory_id,),
-    ).fetchall()
+    ).fetchall())
 
 
-def _links_for_event(conn: sqlite3.Connection, event_id: str) -> list[sqlite3.Row]:
-    return conn.execute(
+def _links_for_event(
+    conn: sqlite3.Connection, event_id: str
+) -> list[SqliteRow]:
+    return _rows(conn.execute(
         "SELECT * FROM links WHERE event_id = ? ORDER BY created_at DESC",
         (event_id,),
-    ).fetchall()
+    ).fetchall())
 
 
-def _compact_links(links: Iterable[sqlite3.Row]) -> str:
+def _compact_links(links: Iterable[SqliteRow]) -> str:
     values = [f"{row['kind']}: {row['value']}" for row in links]
     return "Links: " + "; ".join(values[:24]) if values else ""
 
 
-def _compact_events(events: Iterable[sqlite3.Row]) -> str:
+def _compact_events(events: Iterable[SqliteRow]) -> str:
     values = [
         f"{row['timestamp'] or row['recorded_at']} {row['type']}: {row['text']}"
         for row in events
@@ -406,13 +541,13 @@ def _compact_mapping(label: str, payload: dict[str, object]) -> str:
     )
 
 
-def _metadata_links(links: Iterable[sqlite3.Row]) -> dict[str, object]:
+def _metadata_links(links: Iterable[SqliteRow]) -> dict[str, object]:
     metadata: dict[str, object] = {}
     values_by_kind: dict[str, list[str]] = {}
     for row in links:
         kind = str(row["kind"])
         value = str(row["value"])
-        values_by_kind.setdefault(kind, [])
+        _ = values_by_kind.setdefault(kind, [])
         if value not in values_by_kind[kind]:
             values_by_kind[kind].append(value)
     for kind, values in values_by_kind.items():
@@ -437,7 +572,8 @@ def _clean_metadata(payload: dict[str, object]) -> dict[str, object]:
         if value is None:
             continue
         if isinstance(value, list):
-            string_values = [str(item) for item in value if item is not None]
+            list_value = cast(list[object], value)
+            string_values = [str(item) for item in list_value if item is not None]
             if string_values:
                 cleaned[key] = string_values
             continue
@@ -454,7 +590,7 @@ def _load_json(payload: object) -> dict[str, object]:
     if not payload:
         return {}
     try:
-        data = json.loads(str(payload))
+        data = cast(object, json.loads(str(payload)))
     except json.JSONDecodeError:
         return {}
     return cast(dict[str, object], data) if isinstance(data, dict) else {}
@@ -466,9 +602,11 @@ def _connect(db_path: SQLitePath) -> sqlite3.Connection:
     return conn
 
 
-def _claim_rows(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
-    conn.execute("BEGIN IMMEDIATE")
-    rows = conn.execute(
+def _claim_rows(
+    conn: sqlite3.Connection, limit: int
+) -> list[SqliteRow]:
+    _ = conn.execute("BEGIN IMMEDIATE")
+    rows = _rows(conn.execute(
         """
         SELECT * FROM memory_index_queue
         WHERE (
@@ -484,13 +622,13 @@ def _claim_rows(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
         LIMIT ?
         """,
         (limit,),
-    ).fetchall()
+    ).fetchall())
     if not rows:
         conn.commit()
         return []
     ids = [str(row["id"]) for row in rows]
     placeholders = ",".join("?" for _ in ids)
-    conn.execute(
+    _ = conn.execute(
         f"""
         UPDATE memory_index_queue
         SET status = 'processing',
@@ -503,22 +641,20 @@ def _claim_rows(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
     return rows
 
 
-def _mark_done(conn: sqlite3.Connection, queue_id: str) -> None:
-    _mark_many_done(conn, [queue_id])
-
-
 def _mark_failed(conn: sqlite3.Connection, queue_id: str, error: str) -> None:
     _mark_many_failed(conn, [queue_id], error)
 
 
 def _release_claimed_rows(
-    conn: sqlite3.Connection, rows: list[sqlite3.Row], error: str
+    conn: sqlite3.Connection,
+    rows: list[SqliteRow],
+    error: str,
 ) -> None:
     if not rows:
         return
     queue_ids = [str(row["id"]) for row in rows]
     placeholders = ",".join("?" for _ in queue_ids)
-    conn.execute(
+    _ = conn.execute(
         f"""
         UPDATE memory_index_queue
         SET status = CASE
@@ -542,7 +678,7 @@ def _mark_many_done(conn: sqlite3.Connection, queue_ids: list[str]) -> None:
     if not queue_ids:
         return
     placeholders = ",".join("?" for _ in queue_ids)
-    conn.execute(
+    _ = conn.execute(
         f"""
         UPDATE memory_index_queue
         SET status = 'done',
@@ -560,7 +696,7 @@ def _mark_many_failed(
     if not queue_ids:
         return
     placeholders = ",".join("?" for _ in queue_ids)
-    conn.execute(
+    _ = conn.execute(
         f"""
         UPDATE memory_index_queue
         SET status = CASE
@@ -586,16 +722,16 @@ def _mark_many_failed(
 
 def queue_stats(conn: sqlite3.Connection) -> dict[str, object]:
     counts = {
-        str(row["status"]): int(row["count"])
-        for row in conn.execute(
+        str(row["status"]): int(cast(int, row["count"]))
+        for row in _rows(conn.execute(
             """
             SELECT status, COUNT(*) AS count
             FROM memory_index_queue
             GROUP BY status
             """
-        ).fetchall()
+        ).fetchall())
     }
-    oldest = conn.execute(
+    oldest = _row(conn.execute(
         """
         SELECT created_at
         FROM memory_index_queue
@@ -603,8 +739,8 @@ def queue_stats(conn: sqlite3.Connection) -> dict[str, object]:
         ORDER BY created_at ASC
         LIMIT 1
         """
-    ).fetchone()
-    failed = conn.execute(
+    ).fetchone())
+    failed = _rows(conn.execute(
         """
         SELECT id, entity_type, entity_id, attempts, last_error
         FROM memory_index_queue
@@ -612,14 +748,14 @@ def queue_stats(conn: sqlite3.Connection) -> dict[str, object]:
         ORDER BY updated_at DESC
         LIMIT 3
         """
-    ).fetchall()
+    ).fetchall())
     return {
         "pending": counts.get("pending", 0),
         "processing": counts.get("processing", 0),
         "failed": counts.get("failed", 0),
         "dead": counts.get("dead", 0),
         "done": counts.get("done", 0),
-        "oldest_active_age_seconds": _age_seconds(oldest["created_at"])
+        "oldest_active_age_seconds": _age_seconds(str(oldest["created_at"]))
         if oldest
         else 0,
         "recent_failures": [

@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import cast
 
 DEFAULT_OUTPUT = Path(__file__).resolve().parent.parent / "generated" / "openapi.json"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -15,7 +16,7 @@ from server.app import app
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export the FastAPI OpenAPI schema")
-    parser.add_argument(
+    _ = parser.add_argument(
         "--output",
         type=Path,
         default=DEFAULT_OUTPUT,
@@ -23,9 +24,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    output = args.output
+    output = cast(Path, cast(object, args.output))
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
+    _ = output.write_text(
         json.dumps(app.openapi(), indent=2, sort_keys=True),
         encoding="utf-8",
     )

@@ -1,5 +1,5 @@
 """SQLite-backed memory contexts, events, links, and lexical search."""
-# pyright: reportAny=false, reportExplicitAny=false, reportUnannotatedClassAttribute=false, reportUnusedCallResult=false, reportUnnecessaryIsInstance=false, reportUnknownVariableType=false
+# pyright: reportUnusedCallResult=false, reportUnnecessaryIsInstance=false
 
 from __future__ import annotations
 
@@ -15,12 +15,36 @@ from time import perf_counter
 from typing import Any, cast
 
 from ...config import get_settings
+from ...core.paths import get_data_dir
+from ...core.sqlite_row import SqliteRow
 from ...logging_config import logger
 from ...utils.timezones import now_in_user_timezone
 
-_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+_DATA_DIR = get_data_dir()
 _MEMORY_DB_PATH = _DATA_DIR / "memory.db"
-_TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]*")
+_TOKEN_PATTERN: re.Pattern[str] = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]*")
+
+
+# `_row` / `_rows` absorb the `Any` that sqlite3's cursor methods return.
+# Returning `SqliteRow` (a Protocol that exposes only what sqlite3.Row actually
+# implements — __getitem__/keys/__len__/__iter__) keeps the typechecker honest:
+# callers can't accidentally invoke .values()/.items()/.get() and crash at
+# runtime the way `Mapping[str, object]` allowed.
+def _row(value: Any) -> SqliteRow | None:  # pyright: ignore[reportExplicitAny, reportAny]
+    """Type the result of sqlite3 fetchone()."""
+    if value is None:
+        return None
+    return cast(SqliteRow, cast(object, value))
+
+
+def _rows(values: Any) -> list[SqliteRow]:  # pyright: ignore[reportExplicitAny, reportAny]
+    """Type the result of sqlite3 fetchall()."""
+    return cast("list[SqliteRow]", cast(object, values))
+
+
+def _opt_str(value: object) -> str | None:
+    """Narrow an arbitrary value to str | None for str|None-typed fields."""
+    return value if isinstance(value, str) else None
 
 
 @dataclass(frozen=True)
@@ -44,7 +68,7 @@ class MemoryEvent:
     recorded_at: str
     source: str | None
     text: str
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
     links: list[MemoryLink] = field(default_factory=list)
 
 
@@ -58,7 +82,7 @@ class MemoryRecord:
     summary: str
     created_at: str
     updated_at: str
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
     links: list[MemoryLink] = field(default_factory=list)
     recent_events: list[MemoryEvent] = field(default_factory=list)
 
@@ -73,8 +97,19 @@ class MemorySearchResult:
     reason: str
 
 
+from ...core.workspace_context import require_current_workspace
+
+
+def _resolve_workspace(workspace_id: str | None) -> str:
+    return workspace_id or require_current_workspace()
+
+
+
 class MemoryStore:
     """Persistence and retrieval for memory contexts."""
+
+    _db_path: Path
+    _lock: threading.Lock
 
     def __init__(self, db_path: Path = _MEMORY_DB_PATH) -> None:
         self._db_path = db_path
@@ -86,12 +121,14 @@ class MemoryStore:
     def create_memory(
         self,
         *,
+        workspace_id: str | None = None,
         kind: str,
         title: str,
         summary: str = "",
-        metadata: dict[str, Any] | None = None,
-        links: Iterable[MemoryLink | dict[str, Any]] | None = None,
+        metadata: dict[str, object] | None = None,
+        links: Iterable[MemoryLink | dict[str, object]] | None = None,
     ) -> MemoryRecord:
+        workspace_id = _resolve_workspace(workspace_id)
         memory_id = self._new_id("mem")
         timestamp = self._now()
         normalized_links = self._normalize_links(links or [])
@@ -100,10 +137,12 @@ class MemoryStore:
             conn.execute(
                 """
                 INSERT INTO memories (
-                    memory_id, kind, title, summary, created_at, updated_at, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    workspace_id, memory_id, kind, title, summary,
+                    created_at, updated_at, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    workspace_id,
                     memory_id,
                     kind,
                     title,
@@ -114,26 +153,36 @@ class MemoryStore:
                 ),
             )
             for link in normalized_links:
-                self._insert_link(conn, memory_id, None, link, timestamp)
-            self._enqueue_index(conn, "memory", memory_id, "upsert", timestamp)
+                self._insert_link(
+                    conn, workspace_id, memory_id, None, link, timestamp
+                )
+            self._enqueue_index(
+                conn, workspace_id, "memory", memory_id, "upsert", timestamp
+            )
             conn.commit()
 
-        memory = self.get_memory(memory_id)
+        memory = self.get_memory(memory_id, workspace_id=workspace_id)
         if memory is None:
             raise RuntimeError(f"Failed to create memory: {memory_id}")
         return memory
 
-    def get_memory(self, memory_id: str) -> MemoryRecord | None:
+    def get_memory(
+        self, memory_id: str, *, workspace_id: str | None = None
+    ) -> MemoryRecord | None:
+        workspace_id = _resolve_workspace(workspace_id)
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM memories WHERE memory_id = ?",
-                (memory_id,),
-            ).fetchone()
+            row = _row(conn.execute(
+                "SELECT * FROM memories WHERE workspace_id = ? AND memory_id = ?",
+                (workspace_id, memory_id),
+            ).fetchone())
             if row is None:
                 return None
             return self._memory_from_row(conn, row)
 
-    def get_memories(self, memory_ids: Iterable[str]) -> dict[str, MemoryRecord]:
+    def get_memories(
+        self, memory_ids: Iterable[str], *, workspace_id: str | None = None
+    ) -> dict[str, MemoryRecord]:
+        workspace_id = _resolve_workspace(workspace_id)
         ordered_ids = list(
             dict.fromkeys(str(memory_id) for memory_id in memory_ids if memory_id)
         )
@@ -141,10 +190,13 @@ class MemoryStore:
             return {}
         placeholders = ",".join("?" for _ in ordered_ids)
         with self._connect() as conn:
-            rows = conn.execute(
-                f"SELECT * FROM memories WHERE memory_id IN ({placeholders})",
-                ordered_ids,
-            ).fetchall()
+            rows = _rows(conn.execute(
+                f"""
+                SELECT * FROM memories
+                WHERE workspace_id = ? AND memory_id IN ({placeholders})
+                """,
+                [workspace_id, *ordered_ids],
+            ).fetchall())
             memories = {
                 str(row["memory_id"]): self._memory_from_row(conn, row) for row in rows
             }
@@ -158,17 +210,19 @@ class MemoryStore:
         self,
         memory_id: str,
         *,
+        workspace_id: str | None = None,
         title: str | None = None,
         summary: str | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> MemoryRecord | None:
         """Update memory display fields without creating a new memory."""
+        workspace_id = _resolve_workspace(workspace_id)
         timestamp = self._now()
         with self._connect() as conn:
-            existing = conn.execute(
-                "SELECT * FROM memories WHERE memory_id = ?",
-                (memory_id,),
-            ).fetchone()
+            existing = _row(conn.execute(
+                "SELECT * FROM memories WHERE workspace_id = ? AND memory_id = ?",
+                (workspace_id, memory_id),
+            ).fetchone())
             if existing is None:
                 return None
 
@@ -183,40 +237,48 @@ class MemoryStore:
                     summary = COALESCE(?, summary),
                     metadata_json = ?,
                     updated_at = ?
-                WHERE memory_id = ?
+                WHERE workspace_id = ? AND memory_id = ?
                 """,
                 (
                     title,
                     summary,
                     self._dump_json(existing_metadata),
                     timestamp,
+                    workspace_id,
                     memory_id,
                 ),
             )
-            self._enqueue_index(conn, "memory", memory_id, "upsert", timestamp)
+            self._enqueue_index(
+                conn, workspace_id, "memory", memory_id, "upsert", timestamp
+            )
             conn.commit()
-            row = conn.execute(
-                "SELECT * FROM memories WHERE memory_id = ?",
-                (memory_id,),
-            ).fetchone()
+            row = _row(conn.execute(
+                "SELECT * FROM memories WHERE workspace_id = ? AND memory_id = ?",
+                (workspace_id, memory_id),
+            ).fetchone())
+            if row is None:
+                raise RuntimeError(f"Memory disappeared after update: {memory_id}")
             return self._memory_from_row(conn, row)
 
-    def find_memory_by_link(self, *, kind: str, value: str) -> MemoryRecord | None:
+    def find_memory_by_link(
+        self, *, workspace_id: str | None = None, kind: str, value: str
+    ) -> MemoryRecord | None:
+        workspace_id = _resolve_workspace(workspace_id)
         normalized_value = str(value).strip()
         if not normalized_value:
             return None
         with self._connect() as conn:
-            row = conn.execute(
+            row = _row(conn.execute(
                 """
                 SELECT m.*
                 FROM memories m
-                JOIN links l ON l.memory_id = m.memory_id
-                WHERE l.kind = ? AND l.value = ?
+                JOIN links l ON l.memory_id = m.memory_id AND l.workspace_id = m.workspace_id
+                WHERE m.workspace_id = ? AND l.kind = ? AND l.value = ?
                 ORDER BY m.updated_at DESC
                 LIMIT 1
                 """,
-                (kind, normalized_value),
-            ).fetchone()
+                (workspace_id, kind, normalized_value),
+            ).fetchone())
             if row is None:
                 return None
             return self._memory_from_row(conn, row)
@@ -224,11 +286,13 @@ class MemoryStore:
     def find_event_by_link(
         self,
         *,
+        workspace_id: str | None = None,
         kind: str,
         value: str,
         event_type: str | None = None,
     ) -> MemoryEvent | None:
         """Return the newest event attached to a stable link."""
+        workspace_id = _resolve_workspace(workspace_id)
         normalized_value = str(value).strip()
         if not normalized_value:
             return None
@@ -236,17 +300,17 @@ class MemoryStore:
         query = """
             SELECT e.*
             FROM events e
-            JOIN links l ON l.event_id = e.event_id
-            WHERE l.kind = ? AND l.value = ?
+            JOIN links l ON l.event_id = e.event_id AND l.workspace_id = e.workspace_id
+            WHERE e.workspace_id = ? AND l.kind = ? AND l.value = ?
         """
-        params: list[object] = [kind, normalized_value]
+        params: list[object] = [workspace_id, kind, normalized_value]
         if event_type:
             query += " AND e.type = ?"
             params.append(event_type)
         query += " ORDER BY COALESCE(e.timestamp, e.recorded_at) DESC LIMIT 1"
 
         with self._connect() as conn:
-            row = conn.execute(query, params).fetchone()
+            row = _row(conn.execute(query, params).fetchone())
             if row is None:
                 return None
             return self._event_from_row(conn, row)
@@ -254,20 +318,29 @@ class MemoryStore:
     def ensure_memory_for_links(
         self,
         *,
+        workspace_id: str | None = None,
         kind: str,
         title: str,
         summary: str = "",
-        metadata: dict[str, Any] | None = None,
-        links: Iterable[MemoryLink | dict[str, Any]] | None = None,
+        metadata: dict[str, object] | None = None,
+        links: Iterable[MemoryLink | dict[str, object]] | None = None,
     ) -> MemoryRecord:
+        workspace_id = _resolve_workspace(workspace_id)
         normalized_links = self._normalize_links(links or [])
         for link in normalized_links:
             if link.kind in {"gmail_thread", "gmail_message"}:
-                existing = self.find_memory_by_link(kind=link.kind, value=link.value)
+                existing = self.find_memory_by_link(
+                    workspace_id=workspace_id, kind=link.kind, value=link.value
+                )
                 if existing is not None:
-                    self.add_links(existing.memory_id, normalized_links)
+                    self.add_links(
+                        existing.memory_id,
+                        normalized_links,
+                        workspace_id=workspace_id,
+                    )
                     return existing
         return self.create_memory(
+            workspace_id=workspace_id,
             kind=kind,
             title=title,
             summary=summary,
@@ -278,17 +351,21 @@ class MemoryStore:
     def record_event(
         self,
         *,
+        workspace_id: str | None = None,
         type: str,
         text: str,
         memory_id: str | None = None,
         idempotency_key: str | None = None,
         timestamp: str | None = None,
         source: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        links: Iterable[MemoryLink | dict[str, Any]] | None = None,
+        metadata: dict[str, object] | None = None,
+        links: Iterable[MemoryLink | dict[str, object]] | None = None,
     ) -> MemoryEvent:
+        workspace_id = _resolve_workspace(workspace_id)
         normalized_links = self._normalize_links(links or [])
-        resolved_memory_id = memory_id or self._resolve_memory_id(normalized_links)
+        resolved_memory_id = memory_id or self._resolve_memory_id(
+            workspace_id, normalized_links
+        )
         recorded_at = self._now()
 
         with self._connect() as conn:
@@ -298,11 +375,12 @@ class MemoryStore:
                 conn.execute(
                     f"""
                     {insert_verb} INTO events (
-                        event_id, memory_id, idempotency_key, type, timestamp, recorded_at,
-                        source, text, metadata_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        workspace_id, event_id, memory_id, idempotency_key, type,
+                        timestamp, recorded_at, source, text, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
+                        workspace_id,
                         event_id,
                         resolved_memory_id,
                         idempotency_key,
@@ -319,10 +397,13 @@ class MemoryStore:
                     raise
 
             if idempotency_key:
-                row = conn.execute(
-                    "SELECT * FROM events WHERE idempotency_key = ?",
-                    (idempotency_key,),
-                ).fetchone()
+                row = _row(conn.execute(
+                    """
+                    SELECT * FROM events
+                    WHERE workspace_id = ? AND idempotency_key = ?
+                    """,
+                    (workspace_id, idempotency_key),
+                ).fetchone())
                 if row is None:
                     raise sqlite3.IntegrityError(
                         f"Failed to resolve event for idempotency_key={idempotency_key}"
@@ -333,70 +414,100 @@ class MemoryStore:
                         for link in normalized_links:
                             self._insert_link(
                                 conn,
+                                workspace_id,
                                 resolved_memory_id,
                                 event.event_id,
                                 link,
                                 recorded_at,
                             )
                         conn.execute(
-                            "UPDATE memories SET updated_at = ? WHERE memory_id = ?",
-                            (recorded_at, resolved_memory_id),
+                            """
+                            UPDATE memories SET updated_at = ?
+                            WHERE workspace_id = ? AND memory_id = ?
+                            """,
+                            (recorded_at, workspace_id, resolved_memory_id),
                         )
                         self._enqueue_index(
-                            conn, "memory", resolved_memory_id, "upsert", recorded_at
+                            conn, workspace_id, "memory",
+                            resolved_memory_id, "upsert", recorded_at,
                         )
                         self._enqueue_index(
-                            conn, "event", event.event_id, "upsert", recorded_at
+                            conn, workspace_id, "event",
+                            event.event_id, "upsert", recorded_at,
                         )
                         conn.commit()
                     return event
 
             if resolved_memory_id:
                 conn.execute(
-                    "UPDATE memories SET updated_at = ? WHERE memory_id = ?",
-                    (recorded_at, resolved_memory_id),
+                    """
+                    UPDATE memories SET updated_at = ?
+                    WHERE workspace_id = ? AND memory_id = ?
+                    """,
+                    (recorded_at, workspace_id, resolved_memory_id),
                 )
                 self._enqueue_index(
-                    conn, "memory", resolved_memory_id, "upsert", recorded_at
+                    conn, workspace_id, "memory",
+                    resolved_memory_id, "upsert", recorded_at,
                 )
             for link in normalized_links:
-                self._insert_link(conn, resolved_memory_id, event_id, link, recorded_at)
-            self._enqueue_index(conn, "event", event_id, "upsert", recorded_at)
-            conn.commit()
-            return self._event_from_row(
-                conn,
-                conn.execute(
-                    "SELECT * FROM events WHERE event_id = ?", (event_id,)
-                ).fetchone(),
+                self._insert_link(
+                    conn, workspace_id, resolved_memory_id,
+                    event_id, link, recorded_at,
+                )
+            self._enqueue_index(
+                conn, workspace_id, "event", event_id, "upsert", recorded_at
             )
+            conn.commit()
+            final_row = _row(conn.execute(
+                "SELECT * FROM events WHERE workspace_id = ? AND event_id = ?",
+                (workspace_id, event_id),
+            ).fetchone())
+            if final_row is None:
+                raise RuntimeError(f"Event disappeared after insert: {event_id}")
+            return self._event_from_row(conn, final_row)
 
     def add_links(
         self,
         memory_id: str,
-        links: Iterable[MemoryLink | dict[str, Any]],
+        links: Iterable[MemoryLink | dict[str, object]],
         event_id: str | None = None,
+        *,
+        workspace_id: str | None = None,
     ) -> None:
+        workspace_id = _resolve_workspace(workspace_id)
         normalized_links = self._normalize_links(links)
         timestamp = self._now()
         with self._connect() as conn:
             for link in normalized_links:
-                self._insert_link(conn, memory_id, event_id, link, timestamp)
+                self._insert_link(
+                    conn, workspace_id, memory_id, event_id, link, timestamp
+                )
             conn.execute(
-                "UPDATE memories SET updated_at = ? WHERE memory_id = ?",
-                (timestamp, memory_id),
+                """
+                UPDATE memories SET updated_at = ?
+                WHERE workspace_id = ? AND memory_id = ?
+                """,
+                (timestamp, workspace_id, memory_id),
             )
-            self._enqueue_index(conn, "memory", memory_id, "upsert", timestamp)
+            self._enqueue_index(
+                conn, workspace_id, "memory", memory_id, "upsert", timestamp
+            )
             if event_id:
-                self._enqueue_index(conn, "event", event_id, "upsert", timestamp)
+                self._enqueue_index(
+                    conn, workspace_id, "event", event_id, "upsert", timestamp
+                )
             conn.commit()
 
     def search(
         self,
         query: str,
         *,
+        workspace_id: str | None = None,
         limit: int = 8,
         context: str = "memory_search",
     ) -> list[MemorySearchResult]:
+        workspace_id = _resolve_workspace(workspace_id)
         from .hybrid_search import hybrid_candidates
         from .indexer import pinecone_enabled
         from .ranking import PromptContextRanker, SearchResultRanker
@@ -405,7 +516,9 @@ class MemoryStore:
         if pinecone_enabled():
             started = perf_counter()
             try:
-                candidates = hybrid_candidates(self._db_path, query, top_k=60)
+                candidates = hybrid_candidates(
+                    self._db_path, query, top_k=60, workspace_id=workspace_id
+                )
                 if candidates:
                     ranked_candidates = rerank_candidates(
                         query,
@@ -413,9 +526,9 @@ class MemoryStore:
                         limit=max(limit, 1),
                     )
                     ranker = (
-                        PromptContextRanker(self)
+                        PromptContextRanker(self, workspace_id=workspace_id)
                         if context == "prompt_context"
-                        else SearchResultRanker(self)
+                        else SearchResultRanker(self, workspace_id=workspace_id)
                     )
                     results = cast(
                         list[MemorySearchResult],
@@ -427,7 +540,7 @@ class MemoryStore:
                             results=results,
                             backend="pinecone_hybrid",
                         )
-                        logger.info(
+                        logger.debug(
                             "Hybrid memory ranking completed",
                             extra={
                                 "context": context,
@@ -463,7 +576,9 @@ class MemoryStore:
                     extra={"context": context, "error": str(exc)},
                 )
 
-        return self._search_lexical(query, limit=limit, context=context)
+        return self._search_lexical(
+            query, workspace_id=workspace_id, limit=limit, context=context
+        )
 
     def _log_ranked_results(
         self,
@@ -514,27 +629,34 @@ class MemoryStore:
                 lines.append(event_line)
             lines.append("</events>")
         lines.append("</ranked_memories>")
-        logger.info("\n".join(lines))
+        logger.debug("\n".join(lines))
 
     def _search_lexical(
         self,
         query: str,
         *,
+        workspace_id: str | None = None,
         limit: int = 8,
         context: str = "memory_search",
     ) -> list[MemorySearchResult]:
+        workspace_id = _resolve_workspace(workspace_id)
         terms = self._tokens(query)
         if not terms:
-            logger.info(
+            logger.debug(
                 "Memory ranking skipped",
                 extra={"context": context, "query": query, "reason": "no_terms"},
             )
             return []
 
         with self._connect() as conn:
-            memory_rows = conn.execute(
-                "SELECT * FROM memories ORDER BY updated_at DESC LIMIT 1000"
-            ).fetchall()
+            memory_rows = _rows(conn.execute(
+                """
+                SELECT * FROM memories
+                WHERE workspace_id = ?
+                ORDER BY updated_at DESC LIMIT 1000
+                """,
+                (workspace_id,),
+            ).fetchall())
             scores: dict[str, float] = {}
             reasons: dict[str, set[str]] = {}
 
@@ -558,16 +680,19 @@ class MemoryStore:
                     "metadata",
                 )
 
-            for row in conn.execute(
+            for row in _rows(conn.execute(
                 """
                 SELECT * FROM events
+                WHERE workspace_id = ?
                 ORDER BY COALESCE(timestamp, recorded_at) DESC
                 LIMIT 5000
-                """
-            ).fetchall():
-                memory_id = row["memory_id"]
-                if not memory_id:
+                """,
+                (workspace_id,),
+            ).fetchall()):
+                memory_id_value = _opt_str(row["memory_id"])
+                if not memory_id_value:
                     continue
+                memory_id = memory_id_value
                 scores.setdefault(memory_id, 0.0)
                 reasons.setdefault(memory_id, set())
                 self._score_text(
@@ -583,12 +708,18 @@ class MemoryStore:
                     "event metadata",
                 )
 
-            for row in conn.execute(
-                "SELECT * FROM links ORDER BY created_at DESC LIMIT 5000"
-            ).fetchall():
-                memory_id = row["memory_id"]
-                if not memory_id:
+            for row in _rows(conn.execute(
+                """
+                SELECT * FROM links
+                WHERE workspace_id = ?
+                ORDER BY created_at DESC LIMIT 5000
+                """,
+                (workspace_id,),
+            ).fetchall()):
+                memory_id_value = _opt_str(row["memory_id"])
+                if not memory_id_value:
                     continue
+                memory_id = memory_id_value
                 scores.setdefault(memory_id, 0.0)
                 reasons.setdefault(memory_id, set())
                 value = str(row["value"] or "")
@@ -608,10 +739,10 @@ class MemoryStore:
 
             results: list[MemorySearchResult] = []
             for memory_id in ranked_ids:
-                row = conn.execute(
-                    "SELECT * FROM memories WHERE memory_id = ?",
-                    (memory_id,),
-                ).fetchone()
+                row = _row(conn.execute(
+                    "SELECT * FROM memories WHERE workspace_id = ? AND memory_id = ?",
+                    (workspace_id, memory_id),
+                ).fetchone())
                 if row is None:
                     continue
                 score = scores[memory_id]
@@ -638,10 +769,12 @@ class MemoryStore:
         self,
         memory_id: str,
         *,
+        workspace_id: str | None = None,
         query: str | None = None,
         event_limit: int = 12,
     ) -> str:
-        memory = self.get_memory(memory_id)
+        workspace_id = _resolve_workspace(workspace_id)
+        memory = self.get_memory(memory_id, workspace_id=workspace_id)
         if memory is None:
             return ""
 
@@ -704,20 +837,80 @@ class MemoryStore:
         return [item[2] for item in sorted(selected, key=lambda item: item[1])]
 
     def clear_all(self) -> None:
+        """Dev-only: wipe every workspace's memory. Used by dev reset routes."""
         with self._connect() as conn:
             timestamp = self._now()
-            for row in conn.execute("SELECT memory_id FROM memories").fetchall():
+            for row in _rows(conn.execute(
+                "SELECT workspace_id, memory_id FROM memories"
+            ).fetchall()):
                 self._enqueue_index(
-                    conn, "memory", str(row["memory_id"]), "delete", timestamp
+                    conn,
+                    str(row["workspace_id"]),
+                    "memory",
+                    str(row["memory_id"]),
+                    "delete",
+                    timestamp,
                 )
-            for row in conn.execute("SELECT event_id FROM events").fetchall():
+            for row in _rows(conn.execute(
+                "SELECT workspace_id, event_id FROM events"
+            ).fetchall()):
                 self._enqueue_index(
-                    conn, "event", str(row["event_id"]), "delete", timestamp
+                    conn,
+                    str(row["workspace_id"]),
+                    "event",
+                    str(row["event_id"]),
+                    "delete",
+                    timestamp,
                 )
             conn.execute("DELETE FROM links")
             conn.execute("DELETE FROM events")
             conn.execute("DELETE FROM memories")
             conn.commit()
+
+    def clear_workspace(self, workspace_id: str) -> None:
+        with self._connect() as conn:
+            timestamp = self._now()
+            for row in _rows(conn.execute(
+                "SELECT memory_id FROM memories WHERE workspace_id = ?",
+                (workspace_id,),
+            ).fetchall()):
+                self._enqueue_index(
+                    conn,
+                    workspace_id,
+                    "memory",
+                    str(row["memory_id"]),
+                    "delete",
+                    timestamp,
+                )
+            for row in _rows(conn.execute(
+                "SELECT event_id FROM events WHERE workspace_id = ?",
+                (workspace_id,),
+            ).fetchall()):
+                self._enqueue_index(
+                    conn,
+                    workspace_id,
+                    "event",
+                    str(row["event_id"]),
+                    "delete",
+                    timestamp,
+                )
+            conn.execute(
+                "DELETE FROM links WHERE workspace_id = ?", (workspace_id,)
+            )
+            conn.execute(
+                "DELETE FROM events WHERE workspace_id = ?", (workspace_id,)
+            )
+            conn.execute(
+                "DELETE FROM memories WHERE workspace_id = ?", (workspace_id,)
+            )
+            conn.commit()
+
+    def list_workspaces(self) -> list[str]:
+        with self._connect() as conn:
+            rows = _rows(conn.execute(
+                "SELECT DISTINCT workspace_id FROM memories"
+            ).fetchall())
+        return [str(row["workspace_id"]) for row in rows]
 
     def _ensure_schema(self) -> None:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -725,6 +918,7 @@ class MemoryStore:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS memories (
+                    workspace_id TEXT NOT NULL,
                     memory_id TEXT PRIMARY KEY,
                     kind TEXT NOT NULL,
                     title TEXT NOT NULL,
@@ -735,9 +929,10 @@ class MemoryStore:
                 );
 
                 CREATE TABLE IF NOT EXISTS events (
+                    workspace_id TEXT NOT NULL,
                     event_id TEXT PRIMARY KEY,
                     memory_id TEXT,
-                    idempotency_key TEXT UNIQUE,
+                    idempotency_key TEXT,
                     type TEXT NOT NULL,
                     timestamp TEXT,
                     recorded_at TEXT NOT NULL,
@@ -748,6 +943,7 @@ class MemoryStore:
                 );
 
                 CREATE TABLE IF NOT EXISTS links (
+                    workspace_id TEXT NOT NULL,
                     link_id TEXT PRIMARY KEY,
                     memory_id TEXT,
                     event_id TEXT,
@@ -761,6 +957,7 @@ class MemoryStore:
 
                 CREATE TABLE IF NOT EXISTS memory_index_queue (
                     id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
                     idempotency_key TEXT,
                     entity_type TEXT NOT NULL,
                     entity_id TEXT NOT NULL,
@@ -775,41 +972,33 @@ class MemoryStore:
                     updated_at TEXT NOT NULL
                 );
 
-                CREATE INDEX IF NOT EXISTS idx_events_memory_id ON events(memory_id);
-                CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
-                CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
-                CREATE INDEX IF NOT EXISTS idx_links_kind_value ON links(kind, value);
-                CREATE INDEX IF NOT EXISTS idx_links_memory_id ON links(memory_id);
+                CREATE INDEX IF NOT EXISTS idx_memories_workspace
+                    ON memories(workspace_id, updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_events_workspace_memory
+                    ON events(workspace_id, memory_id);
+                CREATE INDEX IF NOT EXISTS idx_events_workspace_type
+                    ON events(workspace_id, type);
+                CREATE INDEX IF NOT EXISTS idx_events_workspace_timestamp
+                    ON events(workspace_id, timestamp);
+                CREATE INDEX IF NOT EXISTS idx_links_workspace_kind_value
+                    ON links(workspace_id, kind, value);
+                CREATE INDEX IF NOT EXISTS idx_links_workspace_memory
+                    ON links(workspace_id, memory_id);
                 CREATE INDEX IF NOT EXISTS idx_memory_index_queue_status
                     ON memory_index_queue(status, created_at);
-                CREATE INDEX IF NOT EXISTS idx_memory_index_queue_entity
-                    ON memory_index_queue(entity_type, entity_id);
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_events_idempotency_key
-                    ON events(idempotency_key);
-                """
-            )
-            self._ensure_queue_columns(conn)
-            conn.execute(
-                """
+                CREATE INDEX IF NOT EXISTS idx_memory_index_queue_workspace_entity
+                    ON memory_index_queue(workspace_id, entity_type, entity_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_events_workspace_idempotency
+                    ON events(workspace_id, idempotency_key)
+                    WHERE idempotency_key IS NOT NULL;
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_links_unique_workspace_memory
+                    ON links(workspace_id, memory_id, kind, value);
                 CREATE INDEX IF NOT EXISTS idx_memory_index_queue_status_available
-                    ON memory_index_queue(status, available_at, created_at)
-                """
-            )
-            self._dedupe_index_queue(conn)
-            conn.execute(
-                """
+                    ON memory_index_queue(status, available_at, created_at);
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_index_queue_active_idempotency
-                    ON memory_index_queue(idempotency_key)
+                    ON memory_index_queue(workspace_id, idempotency_key)
                     WHERE status IN ('pending', 'failed', 'processing')
-                      AND idempotency_key IS NOT NULL
-                """
-            )
-            self._dedupe_links(conn)
-            conn.execute("DROP INDEX IF EXISTS idx_links_unique")
-            conn.execute(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_links_unique_memory
-                    ON links(memory_id, kind, value)
+                      AND idempotency_key IS NOT NULL;
                 """
             )
             conn.commit()
@@ -822,29 +1011,40 @@ class MemoryStore:
         return conn
 
     def _memory_from_row(
-        self, conn: sqlite3.Connection, row: sqlite3.Row
+        self, conn: sqlite3.Connection, row: SqliteRow
     ) -> MemoryRecord:
         memory_id = str(row["memory_id"])
+        workspace_id = str(row["workspace_id"])
         links = [
             MemoryLink(
-                kind=str(link["kind"]), value=str(link["value"]), label=link["label"]
+                kind=str(link["kind"]),
+                value=str(link["value"]),
+                label=_opt_str(link["label"]),
             )
-            for link in conn.execute(
-                "SELECT * FROM links WHERE memory_id = ? ORDER BY created_at DESC",
-                (memory_id,),
-            ).fetchall()
+            for link in _rows(
+                conn.execute(
+                    """
+                    SELECT * FROM links
+                    WHERE workspace_id = ? AND memory_id = ?
+                    ORDER BY created_at DESC
+                    """,
+                    (workspace_id, memory_id),
+                ).fetchall()
+            )
         ]
         events = [
             self._event_from_row(conn, event)
-            for event in conn.execute(
-                """
-                SELECT * FROM events
-                WHERE memory_id = ?
-                ORDER BY COALESCE(timestamp, recorded_at) DESC
-                LIMIT 12
-                """,
-                (memory_id,),
-            ).fetchall()
+            for event in _rows(
+                conn.execute(
+                    """
+                    SELECT * FROM events
+                    WHERE workspace_id = ? AND memory_id = ?
+                    ORDER BY COALESCE(timestamp, recorded_at) DESC
+                    LIMIT 12
+                    """,
+                    (workspace_id, memory_id),
+                ).fetchall()
+            )
         ]
         return MemoryRecord(
             memory_id=memory_id,
@@ -859,26 +1059,35 @@ class MemoryStore:
         )
 
     def _event_from_row(
-        self, conn: sqlite3.Connection, row: sqlite3.Row
+        self, conn: sqlite3.Connection, row: SqliteRow
     ) -> MemoryEvent:
         event_id = str(row["event_id"])
+        workspace_id = str(row["workspace_id"])
         links = [
             MemoryLink(
-                kind=str(link["kind"]), value=str(link["value"]), label=link["label"]
+                kind=str(link["kind"]),
+                value=str(link["value"]),
+                label=_opt_str(link["label"]),
             )
-            for link in conn.execute(
-                "SELECT * FROM links WHERE event_id = ? ORDER BY created_at DESC",
-                (event_id,),
-            ).fetchall()
+            for link in _rows(
+                conn.execute(
+                    """
+                    SELECT * FROM links
+                    WHERE workspace_id = ? AND event_id = ?
+                    ORDER BY created_at DESC
+                    """,
+                    (workspace_id, event_id),
+                ).fetchall()
+            )
         ]
         return MemoryEvent(
             event_id=event_id,
-            memory_id=row["memory_id"],
-            idempotency_key=row["idempotency_key"],
+            memory_id=_opt_str(row["memory_id"]),
+            idempotency_key=_opt_str(row["idempotency_key"]),
             type=str(row["type"]),
-            timestamp=row["timestamp"],
+            timestamp=_opt_str(row["timestamp"]),
             recorded_at=str(row["recorded_at"]),
-            source=row["source"],
+            source=_opt_str(row["source"]),
             text=str(row["text"]),
             metadata=self._load_json(row["metadata_json"]),
             links=links,
@@ -887,6 +1096,7 @@ class MemoryStore:
     def _insert_link(
         self,
         conn: sqlite3.Connection,
+        workspace_id: str,
         memory_id: str | None,
         event_id: str | None,
         link: MemoryLink,
@@ -897,10 +1107,11 @@ class MemoryStore:
         conn.execute(
             """
             INSERT OR IGNORE INTO links (
-                link_id, memory_id, event_id, kind, value, label, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                workspace_id, link_id, memory_id, event_id, kind, value, label, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                workspace_id,
                 self._new_id("lnk"),
                 memory_id,
                 event_id,
@@ -914,6 +1125,7 @@ class MemoryStore:
     def _enqueue_index(
         self,
         conn: sqlite3.Connection,
+        workspace_id: str,
         entity_type: str,
         entity_id: str | None,
         operation: str,
@@ -923,18 +1135,20 @@ class MemoryStore:
             return
 
         timestamp = self._now()
-        idempotency_key = f"{operation}:{entity_type}:{entity_id}"
+        idempotency_key = f"{workspace_id}:{operation}:{entity_type}:{entity_id}"
         queue_id = self._new_id("idx")
         try:
             conn.execute(
                 """
                 INSERT OR IGNORE INTO memory_index_queue (
-                    id, idempotency_key, entity_type, entity_id, operation, version, status,
-                    attempts, available_at, max_attempts, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)
+                    id, workspace_id, idempotency_key, entity_type, entity_id,
+                    operation, version, status, attempts, available_at,
+                    max_attempts, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)
                 """,
                 (
                     queue_id,
+                    workspace_id,
                     idempotency_key,
                     entity_type,
                     entity_id,
@@ -949,15 +1163,15 @@ class MemoryStore:
         except sqlite3.IntegrityError:
             pass
 
-        existing = conn.execute(
+        existing = _row(conn.execute(
             """
             SELECT id FROM memory_index_queue
-            WHERE idempotency_key = ?
+            WHERE workspace_id = ? AND idempotency_key = ?
               AND status IN ('pending', 'failed', 'processing')
             LIMIT 1
             """,
-            (idempotency_key,),
-        ).fetchone()
+            (workspace_id, idempotency_key),
+        ).fetchone())
         if existing is not None:
             conn.execute(
                 """
@@ -974,10 +1188,10 @@ class MemoryStore:
             )
             return
 
-    def _ensure_queue_columns(self, conn: sqlite3.Connection) -> None:
+    def _ensure_queue_columns_unused(self, conn: sqlite3.Connection) -> None:  # noqa: ARG002 - kept for legacy reference
         columns = {
             str(row["name"])
-            for row in conn.execute("PRAGMA table_info(memory_index_queue)").fetchall()
+            for row in _rows(conn.execute("PRAGMA table_info(memory_index_queue)").fetchall())
         }
         if "idempotency_key" not in columns:
             conn.execute(
@@ -1043,16 +1257,20 @@ class MemoryStore:
             """
         )
 
-    def _resolve_memory_id(self, links: Iterable[MemoryLink]) -> str | None:
+    def _resolve_memory_id(
+        self, workspace_id: str, links: Iterable[MemoryLink]
+    ) -> str | None:
         for link in links:
             if link.kind in {"gmail_thread", "gmail_message"}:
-                existing = self.find_memory_by_link(kind=link.kind, value=link.value)
+                existing = self.find_memory_by_link(
+                    workspace_id=workspace_id, kind=link.kind, value=link.value
+                )
                 if existing:
                     return existing.memory_id
         return None
 
     def _normalize_links(
-        self, links: Iterable[MemoryLink | dict[str, Any]]
+        self, links: Iterable[MemoryLink | dict[str, object]]
     ) -> list[MemoryLink]:
         normalized: list[MemoryLink] = []
         seen: set[tuple[str, str]] = set()
@@ -1060,10 +1278,11 @@ class MemoryStore:
             if isinstance(link, MemoryLink):
                 candidate = link
             elif isinstance(link, dict):
+                label_value = link.get("label")
                 candidate = MemoryLink(
                     kind=str(link.get("kind") or "").strip(),
                     value=str(link.get("value") or "").strip(),
-                    label=link.get("label"),
+                    label=label_value if isinstance(label_value, str) else None,
                 )
             else:
                 continue
@@ -1089,9 +1308,11 @@ class MemoryStore:
             reasons[memory_id].add(reason)
 
     def _tokens(self, value: str) -> set[str]:
-        return {
-            token.lower() for token in _TOKEN_PATTERN.findall(value) if len(token) > 1
-        }
+        # `re.Pattern.findall` returns `list[Any]` in typeshed because its shape
+        # depends on whether the pattern has groups. This pattern has none, so
+        # the result is `list[str]`.
+        tokens = cast(list[str], _TOKEN_PATTERN.findall(value))
+        return {token.lower() for token in tokens if len(token) > 1}
 
     def _reason(self, reasons: set[str]) -> str:
         if not reasons:
@@ -1146,7 +1367,7 @@ class MemoryStore:
             for index, result in enumerate(results, start=1)
         ]
         scored_count = sum(1 for score in scores.values() if score > 0)
-        logger.info(
+        logger.debug(
             "Memory ranking completed",
             extra={
                 "context": context,
@@ -1169,14 +1390,16 @@ class MemoryStore:
             payload or {}, ensure_ascii=False, default=str, sort_keys=True
         )
 
-    def _load_json(self, payload: object) -> dict[str, Any]:
+    def _load_json(self, payload: object) -> dict[str, object]:
         if not payload:
             return {}
         try:
-            data = json.loads(str(payload))
+            data = cast(object, json.loads(str(payload)))
         except json.JSONDecodeError:
             return {}
-        return data if isinstance(data, dict) else {}
+        if isinstance(data, dict):
+            return cast(dict[str, object], data)
+        return {}
 
     def _new_id(self, prefix: str) -> str:
         return f"{prefix}_{uuid.uuid4().hex}"

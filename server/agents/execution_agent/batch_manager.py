@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any, Protocol, cast
 
 from ...logging_config import logger
 from ...services.execution import get_execution_event_store
 from .runtime import ExecutionAgentRuntime, ExecutionResult
+
+
+class _InteractionRuntime(Protocol):
+    def handle_agent_message(self, payload: str) -> Coroutine[Any, Any, object]: ...  # pyright: ignore[reportExplicitAny]
+
 
 _running_tasks: set[asyncio.Task[object]] = set()
 
@@ -39,6 +46,9 @@ class _BatchState:
 
 class ExecutionBatchManager:
     """Run execution agents and deliver each outcome independently."""
+
+    timeout_seconds: int
+    _batch_lock: asyncio.Lock
 
     # Initialize batch manager with timeout and coordination state for execution agents
     def __init__(self, timeout_seconds: int = 90) -> None:
@@ -97,6 +107,26 @@ class ExecutionBatchManager:
                 response=f"Execution timed out after {self.timeout_seconds} seconds",
                 error="Timeout",
             )
+        except asyncio.CancelledError:
+            # User-initiated cancellation. The runtime already emitted a
+            # terminal event in its own CancelledError handler — we just
+            # need to release batch state, then re-raise so asyncio marks
+            # the task as cancelled.
+            logger.info(f"[{memory_id}] Execution cancelled")
+            cancelled_result = ExecutionResult(
+                memory_id=memory_id,
+                memory_title=resolved_title,
+                agent_name=memory_id,
+                success=False,
+                response="Cancelled by user",
+                error="cancelled",
+            )
+            cancelled_result.request_id = request_id
+            _ = self._pending.pop(request_id, None)
+            await self._complete_execution(
+                batch_id, cancelled_result, memory_id, notify_user
+            )
+            raise
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception(f"[{memory_id}] Execution failed unexpectedly")
             result = ExecutionResult(
@@ -108,7 +138,7 @@ class ExecutionBatchManager:
                 error=str(exc),
             )
         finally:
-            self._pending.pop(request_id, None)
+            _ = self._pending.pop(request_id, None)
 
         result.request_id = request_id
         get_execution_event_store().record_completed(
@@ -232,13 +262,15 @@ class ExecutionBatchManager:
         from importlib import import_module
 
         module = import_module("server.agents.interaction_agent.runtime")
-        InteractionAgentRuntime = module.InteractionAgentRuntime
+        runtime_cls = cast(
+            type[_InteractionRuntime], cast(object, module.InteractionAgentRuntime)
+        )
 
-        runtime = InteractionAgentRuntime()
+        runtime = runtime_cls()
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            asyncio.run(runtime.handle_agent_message(payload))
+            _ = asyncio.run(runtime.handle_agent_message(payload))
             return
 
         def _handle_dispatch_done(task: asyncio.Task[object]) -> None:
@@ -267,4 +299,6 @@ class ExecutionBatchManager:
             )
             return
 
-        get_conversation_log().record_agent_message(self._format_execution_payload(result))
+        get_conversation_log().record_agent_message(
+            self._format_execution_payload(result)
+        )

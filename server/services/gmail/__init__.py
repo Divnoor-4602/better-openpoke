@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .client import (
     disconnect_account,
-    execute_gmail_tool,
+    execute_google_tool,
     fetch_status,
-    get_active_gmail_user_id,
+    resolve_workspace_gmail_user_id,
     initiate_connect,
 )
 from .importance_classifier import classify_email_importance
 from .processing import EmailTextCleaner, ProcessedEmail, parse_gmail_fetch_response
 from .seen_store import GmailSeenStore
+
+if TYPE_CHECKING:
+    from .importance_watcher import (
+        ImportantEmailWatcher as ImportantEmailWatcher,
+        get_important_email_watcher as get_important_email_watcher,
+    )
 
 
 def __getattr__(name: str) -> object:
@@ -26,11 +34,11 @@ def __getattr__(name: str) -> object:
     raise AttributeError(name)
 
 __all__ = [
-    "execute_gmail_tool",
+    "execute_google_tool",
     "fetch_status",
     "initiate_connect",
     "disconnect_account",
-    "get_active_gmail_user_id",
+    "resolve_workspace_gmail_user_id",
     "classify_email_importance",
     "ImportantEmailWatcher",
     "get_important_email_watcher",

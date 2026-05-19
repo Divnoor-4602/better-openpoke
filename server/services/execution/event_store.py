@@ -8,17 +8,46 @@ import sqlite3
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Literal, TypeAlias, TypedDict, cast
 
+from ...core.paths import get_data_dir
+from ...core.workspace_context import require_current_workspace
 from ...logging_config import logger
 from ...utils.timezones import now_in_user_timezone
 
-_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+
+def _resolve_workspace(workspace_id: str | None) -> str:
+    return workspace_id or require_current_workspace()
+
+_DATA_DIR = get_data_dir()
 _EXECUTION_DB_PATH = _DATA_DIR / "execution_events.db"
 
 
 ExecutionRunStatus = Literal["queued", "running", "completed", "failed"]
-ExecutionEventType = Literal["status", "tool-call", "tool-result", "agent-response"]
+LifecycleScope = Literal["interaction", "execution"]
+ExecutionEventType = Literal[
+    "run.created",
+    "run.started",
+    "model.started",
+    "model.text.delta",
+    "model.reasoning.delta",
+    "model.completed",
+    "tool.input.started",
+    "tool.input.delta",
+    "tool.input.available",
+    "tool.output.available",
+    "tool.output.error",
+    "execution.submitted",
+    "message.created",
+    "run.completed",
+    "run.failed",
+    "error",
+    "status",
+    "tool-call",
+    "tool-result",
+    "agent-response",
+]
 ExecutionEventState = Literal[
     "queued",
     "running",
@@ -36,6 +65,8 @@ SQLiteValue: TypeAlias = str | int | float | bytes | None
 
 class ExecutionEvent(TypedDict):
     id: int | None
+    runId: str
+    sequence: int
     type: ExecutionEventType
     state: ExecutionEventState | None
     toolCallId: str | None
@@ -48,10 +79,13 @@ class ExecutionEvent(TypedDict):
 
 
 class ExecutionRun(TypedDict):
+    runId: str
     requestId: str
     memoryId: str
     threadId: str | None
     parentMemoryId: str | None
+    parentRunId: str | None
+    scope: LifecycleScope
     title: str
     status: ExecutionRunStatus
     ok: bool | None
@@ -61,41 +95,96 @@ class ExecutionRun(TypedDict):
 
 
 class ExecutionEventPayload(TypedDict):
+    workspaceId: str
+    runId: str
     requestId: str
     memoryId: str
     threadId: str | None
     parentMemoryId: str | None
+    parentRunId: str | None
+    scope: LifecycleScope
     title: str
     event: ExecutionEvent
 
 
+# Cap each subscription's in-memory queue. A slow client backing up behind
+# 512 unread events is almost certainly broken or gone — at which point we
+# prefer to lose the oldest waiting events rather than grow the queue
+# unboundedly and OOM the server. The store's index is the source of truth
+# anyway; a reconnect can backfill from SQLite.
+_SUBSCRIPTION_QUEUE_MAXSIZE: int = 512
+
+
 @dataclass
 class ExecutionEventSubscription:
-    """In-process subscription for live execution events."""
+    """In-process subscription for live execution events.
 
+    Subscriptions are workspace-scoped: a sub only ever receives events
+    matching its `workspace_id`. The store's indexes are keyed by
+    (workspace_id, …) so live fan-out never crosses workspaces even if
+    two testers happen to share a thread_id or request_id by accident.
+    """
+
+    workspace_id: str
     request_ids: set[str]
-    queue: asyncio.Queue[ExecutionEventPayload] = field(default_factory=asyncio.Queue)
+    thread_id: str | None = None
+    queue: asyncio.Queue[ExecutionEventPayload] = field(
+        default_factory=lambda: asyncio.Queue(maxsize=_SUBSCRIPTION_QUEUE_MAXSIZE)
+    )
     loop: asyncio.AbstractEventLoop = field(default_factory=asyncio.get_running_loop)
 
     def publish(self, payload: ExecutionEventPayload) -> None:
-        request_id = payload["requestId"]
-        if request_id not in self.request_ids:
+        """Enqueue an already-matched payload. Filtering is handled by the
+        store before this is called — see `ExecutionEventStore.record_event`.
+        """
+        _ = self.loop.call_soon_threadsafe(self._safe_enqueue, payload)
+
+    def _safe_enqueue(self, payload: ExecutionEventPayload) -> None:
+        try:
+            self.queue.put_nowait(payload)
             return
-        _ = self.loop.call_soon_threadsafe(self.queue.put_nowait, payload)
+        except asyncio.QueueFull:
+            pass
+        try:
+            _ = self.queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return
+        try:
+            self.queue.put_nowait(payload)
+        except asyncio.QueueFull:
+            logger.debug(
+                "subscription queue full after eviction; dropping payload",
+                extra={
+                    "workspace_id": payload.get("workspaceId"),
+                    "request_id": payload.get("requestId"),
+                    "thread_id": payload.get("threadId"),
+                },
+            )
 
 
 class ExecutionEventStore:
-    """SQLite-backed run and event store for execution-agent visibility."""
+    """SQLite-backed run and event store for execution-agent visibility.
+
+    Live subscriptions are indexed by (workspace_id, criterion) so
+    publish-time fan-out is O(1 + matching subs) AND never crosses
+    workspaces.
+    """
 
     def __init__(self, db_path: Path = _EXECUTION_DB_PATH) -> None:
         self._db_path: Path = db_path
         self._lock: threading.Lock = threading.Lock()
-        self._subscriptions: list[ExecutionEventSubscription] = []
+        # Indexes keyed by (workspace_id, filter_value).
+        self._thread_index: dict[tuple[str, str], list[ExecutionEventSubscription]] = {}
+        self._request_index: dict[tuple[str, str], list[ExecutionEventSubscription]] = {}
+        # Wildcard / compound subs are still per-workspace.
+        self._wildcard_subs: dict[str, list[ExecutionEventSubscription]] = {}
+        self._compound_subs: dict[str, list[ExecutionEventSubscription]] = {}
         self._ensure_schema()
 
     def record_submitted(
         self,
         *,
+        workspace_id: str | None = None,
         request_id: str,
         memory_id: str,
         title: str,
@@ -103,7 +192,9 @@ class ExecutionEventStore:
         parent_memory_id: str | None = None,
         thread_id: str | None = None,
     ) -> None:
+        workspace_id = _resolve_workspace(workspace_id)
         self._upsert_run(
+            workspace_id=workspace_id,
             request_id=request_id,
             memory_id=memory_id,
             title=title,
@@ -113,17 +204,27 @@ class ExecutionEventStore:
             ok=None,
         )
         self.record_event(
+            workspace_id=workspace_id,
             request_id=request_id,
             memory_id=memory_id,
             parent_memory_id=parent_memory_id,
             thread_id=thread_id,
-            event_type="status",
+            event_type="execution.submitted",
             state="queued",
             text=instructions,
         )
 
-    def record_started(self, *, request_id: str, memory_id: str, title: str) -> None:
+    def record_started(
+        self,
+        *,
+        workspace_id: str | None = None,
+        request_id: str,
+        memory_id: str,
+        title: str,
+    ) -> None:
+        workspace_id = _resolve_workspace(workspace_id)
         self._upsert_run(
+            workspace_id=workspace_id,
             request_id=request_id,
             memory_id=memory_id,
             title=title,
@@ -131,9 +232,10 @@ class ExecutionEventStore:
             ok=None,
         )
         self.record_event(
+            workspace_id=workspace_id,
             request_id=request_id,
             memory_id=memory_id,
-            event_type="status",
+            event_type="run.started",
             state="running",
             text="Execution started",
         )
@@ -141,16 +243,19 @@ class ExecutionEventStore:
     def record_tool_call(
         self,
         *,
+        workspace_id: str | None = None,
         request_id: str,
         memory_id: str,
         tool_call_id: str,
         tool_name: str,
         tool_input: JsonValue,
     ) -> None:
+        workspace_id = _resolve_workspace(workspace_id)
         self.record_event(
+            workspace_id=workspace_id,
             request_id=request_id,
             memory_id=memory_id,
-            event_type="tool-call",
+            event_type="tool.input.available",
             state="input-available",
             tool_call_id=tool_call_id,
             tool_name=tool_name,
@@ -160,6 +265,7 @@ class ExecutionEventStore:
     def record_tool_result(
         self,
         *,
+        workspace_id: str | None = None,
         request_id: str,
         memory_id: str,
         tool_call_id: str,
@@ -168,10 +274,12 @@ class ExecutionEventStore:
         output: JsonValue = None,
         error: str | None = None,
     ) -> None:
+        workspace_id = _resolve_workspace(workspace_id)
         self.record_event(
+            workspace_id=workspace_id,
             request_id=request_id,
             memory_id=memory_id,
-            event_type="tool-result",
+            event_type="tool.output.available" if ok else "tool.output.error",
             state="output-available" if ok else "output-error",
             tool_call_id=tool_call_id,
             tool_name=tool_name,
@@ -182,6 +290,7 @@ class ExecutionEventStore:
     def record_completed(
         self,
         *,
+        workspace_id: str | None = None,
         request_id: str,
         memory_id: str,
         title: str,
@@ -189,8 +298,10 @@ class ExecutionEventStore:
         response: str,
         error: str | None = None,
     ) -> None:
+        workspace_id = _resolve_workspace(workspace_id)
         status = "completed" if ok else "failed"
         self._upsert_run(
+            workspace_id=workspace_id,
             request_id=request_id,
             memory_id=memory_id,
             title=title,
@@ -198,17 +309,19 @@ class ExecutionEventStore:
             ok=ok,
         )
         self.record_event(
+            workspace_id=workspace_id,
             request_id=request_id,
             memory_id=memory_id,
-            event_type="agent-response",
+            event_type="message.created",
             state="output-available" if ok else "output-error",
             text=response,
             error=error,
         )
         self.record_event(
+            workspace_id=workspace_id,
             request_id=request_id,
             memory_id=memory_id,
-            event_type="status",
+            event_type="run.completed" if ok else "run.failed",
             state=status,
             text=status,
             error=error,
@@ -217,6 +330,7 @@ class ExecutionEventStore:
     def record_event(
         self,
         *,
+        workspace_id: str | None = None,
         request_id: str,
         memory_id: str,
         event_type: ExecutionEventType,
@@ -230,9 +344,13 @@ class ExecutionEventStore:
         output: JsonValue = None,
         error: str | None = None,
     ) -> None:
+        workspace_id = _resolve_workspace(workspace_id)
         timestamp = self._now()
+        sequence = self._next_sequence(workspace_id, request_id)
         event: ExecutionEvent = {
             "id": None,
+            "runId": request_id,
+            "sequence": sequence,
             "type": event_type,
             "state": state,
             "toolCallId": tool_call_id,
@@ -244,10 +362,14 @@ class ExecutionEventStore:
             "createdAt": timestamp,
         }
         payload: ExecutionEventPayload = {
+            "workspaceId": workspace_id,
+            "runId": request_id,
             "requestId": request_id,
             "memoryId": memory_id,
             "threadId": thread_id,
             "parentMemoryId": parent_memory_id,
+            "parentRunId": parent_memory_id,
+            "scope": "execution",
             "title": memory_id,
             "event": event,
         }
@@ -255,8 +377,12 @@ class ExecutionEventStore:
             run = cast(
                 sqlite3.Row | None,
                 conn.execute(
-                    "SELECT title, thread_id, parent_memory_id FROM execution_runs WHERE request_id = ?",
-                    (request_id,),
+                    """
+                    SELECT title, thread_id, parent_memory_id
+                    FROM execution_runs
+                    WHERE workspace_id = ? AND request_id = ?
+                    """,
+                    (workspace_id, request_id),
                 ).fetchone(),
             )
             if run is not None:
@@ -273,12 +399,13 @@ class ExecutionEventStore:
             cursor = conn.execute(
                 """
                 INSERT INTO execution_events (
-                    request_id, memory_id, thread_id, parent_memory_id, type, state,
-                    tool_call_id, tool_name, text, input_json, output_json,
+                    workspace_id, request_id, memory_id, thread_id, parent_memory_id,
+                    type, state, tool_call_id, tool_name, text, input_json, output_json,
                     error, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    workspace_id,
                     request_id,
                     memory_id,
                     thread_id,
@@ -295,46 +422,167 @@ class ExecutionEventStore:
                 ),
             )
             event["id"] = cursor.lastrowid
+            event["sequence"] = self._optional_int(cursor.lastrowid) or sequence
             _ = conn.execute(
-                "UPDATE execution_runs SET updated_at = ? WHERE request_id = ?",
-                (timestamp, request_id),
+                """
+                UPDATE execution_runs
+                SET updated_at = ?
+                WHERE workspace_id = ? AND request_id = ?
+                """,
+                (timestamp, workspace_id, request_id),
             )
             conn.commit()
-            subscriptions = list(self._subscriptions)
-        for subscription in subscriptions:
+            targets = self._collect_targets_locked(payload)
+        for subscription in targets:
             subscription.publish(payload)
 
-    def subscribe(self, request_ids: set[str]) -> ExecutionEventSubscription:
-        subscription = ExecutionEventSubscription(request_ids=request_ids)
+    def _collect_targets_locked(
+        self, payload: ExecutionEventPayload
+    ) -> list[ExecutionEventSubscription]:
+        """Return the subscriptions that should receive `payload`. Caller
+        must hold `self._lock`. Order is stable: thread → request →
+        wildcard → compound. All lookups are scoped to the payload's
+        workspace_id, so live events never cross workspaces.
+        """
+        targets: list[ExecutionEventSubscription] = []
+        seen: set[int] = set()
+        workspace_id = payload["workspaceId"]
+        thread_id = payload.get("threadId")
+        if isinstance(thread_id, str):
+            for sub in self._thread_index.get((workspace_id, thread_id), ()):
+                if id(sub) not in seen:
+                    seen.add(id(sub))
+                    targets.append(sub)
+        request_id = payload["requestId"]
+        for sub in self._request_index.get((workspace_id, request_id), ()):
+            if id(sub) not in seen:
+                seen.add(id(sub))
+                targets.append(sub)
+        for sub in self._wildcard_subs.get(workspace_id, ()):
+            if id(sub) not in seen:
+                seen.add(id(sub))
+                targets.append(sub)
+        for sub in self._compound_subs.get(workspace_id, ()):
+            if id(sub) in seen:
+                continue
+            matched_thread = (
+                sub.thread_id is not None
+                and isinstance(thread_id, str)
+                and thread_id == sub.thread_id
+            )
+            matched_request = (
+                bool(sub.request_ids) and request_id in sub.request_ids
+            )
+            if matched_thread or matched_request:
+                seen.add(id(sub))
+                targets.append(sub)
+        return targets
+
+    def subscribe(
+        self,
+        *,
+        workspace_id: str | None = None,
+        request_ids: set[str] | None = None,
+        thread_id: str | None = None,
+    ) -> ExecutionEventSubscription:
+        """Create a workspace-scoped subscription.
+
+        The store indexes it by (workspace_id, criterion) so publishes
+        only walk subs from the same workspace.
+        """
+        workspace_id = _resolve_workspace(workspace_id)
+        normalized_request_ids: set[str] = set(request_ids or ())
+        subscription = ExecutionEventSubscription(
+            workspace_id=workspace_id,
+            request_ids=normalized_request_ids,
+            thread_id=thread_id,
+        )
+        has_thread = thread_id is not None
+        has_requests = bool(normalized_request_ids)
         with self._lock:
-            self._subscriptions.append(subscription)
+            if has_thread and has_requests:
+                self._compound_subs.setdefault(workspace_id, []).append(subscription)
+            elif has_thread:
+                assert thread_id is not None
+                self._thread_index.setdefault(
+                    (workspace_id, thread_id), []
+                ).append(subscription)
+            elif has_requests:
+                for rid in normalized_request_ids:
+                    self._request_index.setdefault(
+                        (workspace_id, rid), []
+                    ).append(subscription)
+            else:
+                self._wildcard_subs.setdefault(workspace_id, []).append(subscription)
         return subscription
 
     def unsubscribe(self, subscription: ExecutionEventSubscription) -> None:
+        workspace_id = subscription.workspace_id
         with self._lock:
-            self._subscriptions = [
-                item for item in self._subscriptions if item is not subscription
-            ]
+            bucket = self._wildcard_subs.get(workspace_id)
+            if bucket is not None:
+                remaining = [item for item in bucket if item is not subscription]
+                if remaining:
+                    self._wildcard_subs[workspace_id] = remaining
+                else:
+                    _ = self._wildcard_subs.pop(workspace_id, None)
+            bucket = self._compound_subs.get(workspace_id)
+            if bucket is not None:
+                remaining = [item for item in bucket if item is not subscription]
+                if remaining:
+                    self._compound_subs[workspace_id] = remaining
+                else:
+                    _ = self._compound_subs.pop(workspace_id, None)
+            if subscription.thread_id is not None:
+                key = (workspace_id, subscription.thread_id)
+                bucket = self._thread_index.get(key)
+                if bucket is not None:
+                    remaining = [item for item in bucket if item is not subscription]
+                    if remaining:
+                        self._thread_index[key] = remaining
+                    else:
+                        _ = self._thread_index.pop(key, None)
+            for rid in subscription.request_ids:
+                key = (workspace_id, rid)
+                bucket = self._request_index.get(key)
+                if bucket is None:
+                    continue
+                remaining = [item for item in bucket if item is not subscription]
+                if remaining:
+                    self._request_index[key] = remaining
+                else:
+                    _ = self._request_index.pop(key, None)
 
-    def get_run(self, request_id: str) -> ExecutionRun | None:
+    def get_run(
+        self, request_id: str, *, workspace_id: str | None = None
+    ) -> ExecutionRun | None:
+        workspace_id = _resolve_workspace(workspace_id)
         with self._lock, self._connect() as conn:
             row = cast(
                 sqlite3.Row | None,
                 conn.execute(
-                    "SELECT * FROM execution_runs WHERE request_id = ?",
-                    (request_id,),
+                    """
+                    SELECT * FROM execution_runs
+                    WHERE workspace_id = ? AND request_id = ?
+                    """,
+                    (workspace_id, request_id),
                 ).fetchone(),
             )
             if row is None:
                 return None
-            events = self._events_by_request(conn, [request_id]).get(request_id, [])
+            events = self._events_by_request(
+                conn, workspace_id, [request_id]
+            ).get(request_id, [])
         return {
+            "runId": str(self._row_value(row, "request_id")),
             "requestId": str(self._row_value(row, "request_id")),
             "memoryId": str(self._row_value(row, "memory_id")),
             "threadId": self._optional_str(self._row_value(row, "thread_id")),
             "parentMemoryId": self._optional_str(
                 self._row_value(row, "parent_memory_id")
             ),
+            "parentRunId": self._optional_str(self._row_value(row, "parent_memory_id")),
+            "scope": "execution",
             "title": str(self._row_value(row, "title")),
             "status": cast(ExecutionRunStatus, self._row_value(row, "status")),
             "ok": self._optional_bool(self._row_value(row, "ok")),
@@ -344,23 +592,34 @@ class ExecutionEventStore:
         }
 
     def list_events(
-        self, request_id: str, *, after_id: int = 0
+        self,
+        request_id: str,
+        *,
+        workspace_id: str | None = None,
+        after_id: int = 0,
     ) -> list[ExecutionEvent]:
+        workspace_id = _resolve_workspace(workspace_id)
         with self._lock, self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT *
                 FROM execution_events
-                WHERE request_id = ? AND id > ?
+                WHERE workspace_id = ? AND request_id = ? AND id > ?
                 ORDER BY id ASC
                 """,
-                (request_id, max(0, after_id)),
+                (workspace_id, request_id, max(0, after_id)),
             ).fetchall()
         return [self._event_row_to_part(row) for row in cast(list[sqlite3.Row], rows)]
 
     def list_runs(
-        self, *, limit: int = 30, offset: int = 0, thread_id: str | None = None
+        self,
+        *,
+        workspace_id: str | None = None,
+        limit: int = 30,
+        offset: int = 0,
+        thread_id: str | None = None,
     ) -> list[ExecutionRun]:
+        workspace_id = _resolve_workspace(workspace_id)
         safe_limit = max(1, min(limit, 500))
         safe_offset = max(0, offset)
         with self._lock, self._connect() as conn:
@@ -369,34 +628,40 @@ class ExecutionEventStore:
                     """
                     SELECT *
                     FROM execution_runs
+                    WHERE workspace_id = ?
                     ORDER BY updated_at DESC
                     LIMIT ? OFFSET ?
                     """,
-                    (safe_limit, safe_offset),
+                    (workspace_id, safe_limit, safe_offset),
                 ).fetchall()
             else:
                 rows = conn.execute(
                     """
                     SELECT *
                     FROM execution_runs
-                    WHERE thread_id = ?
+                    WHERE workspace_id = ? AND thread_id = ?
                     ORDER BY updated_at DESC
                     LIMIT ? OFFSET ?
                     """,
-                    (thread_id, safe_limit, safe_offset),
+                    (workspace_id, thread_id, safe_limit, safe_offset),
                 ).fetchall()
             rows = cast(list[sqlite3.Row], rows)
             request_ids = [str(self._row_value(row, "request_id")) for row in rows]
-            events_by_run = self._events_by_request(conn, request_ids)
+            events_by_run = self._events_by_request(conn, workspace_id, request_ids)
 
         return [
             {
                 "requestId": str(self._row_value(row, "request_id")),
+                "runId": str(self._row_value(row, "request_id")),
                 "memoryId": str(self._row_value(row, "memory_id")),
                 "threadId": self._optional_str(self._row_value(row, "thread_id")),
                 "parentMemoryId": self._optional_str(
                     self._row_value(row, "parent_memory_id")
                 ),
+                "parentRunId": self._optional_str(
+                    self._row_value(row, "parent_memory_id")
+                ),
+                "scope": "execution",
                 "title": str(self._row_value(row, "title")),
                 "status": cast(ExecutionRunStatus, self._row_value(row, "status")),
                 "ok": self._optional_bool(self._row_value(row, "ok")),
@@ -407,15 +672,43 @@ class ExecutionEventStore:
             for row in rows
         ]
 
+    def list_workspaces(self) -> list[str]:
+        """Return every workspace that has ever recorded a run.
+
+        Background workers use this to fan out across all workspaces
+        instead of running as a single global loop.
+        """
+        with self._lock, self._connect() as conn:
+            rows = cast(
+                "list[Mapping[str, object]]",
+                cast(object, conn.execute(
+                    "SELECT DISTINCT workspace_id FROM execution_runs"
+                ).fetchall()),
+            )
+        return [str(row["workspace_id"]) for row in rows]
+
     def clear_all(self) -> None:
         with self._lock, self._connect() as conn:
             _ = conn.execute("DELETE FROM execution_events")
             _ = conn.execute("DELETE FROM execution_runs")
             conn.commit()
 
+    def clear_workspace(self, workspace_id: str) -> None:
+        with self._lock, self._connect() as conn:
+            _ = conn.execute(
+                "DELETE FROM execution_events WHERE workspace_id = ?",
+                (workspace_id,),
+            )
+            _ = conn.execute(
+                "DELETE FROM execution_runs WHERE workspace_id = ?",
+                (workspace_id,),
+            )
+            conn.commit()
+
     def _upsert_run(
         self,
         *,
+        workspace_id: str,
         request_id: str,
         memory_id: str,
         title: str,
@@ -429,9 +722,9 @@ class ExecutionEventStore:
             _ = conn.execute(
                 """
                 INSERT INTO execution_runs (
-                    request_id, memory_id, thread_id, parent_memory_id, title, status,
-                    ok, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    workspace_id, request_id, memory_id, thread_id, parent_memory_id,
+                    title, status, ok, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(request_id) DO UPDATE SET
                     memory_id = excluded.memory_id,
                     thread_id = COALESCE(excluded.thread_id, execution_runs.thread_id),
@@ -440,8 +733,10 @@ class ExecutionEventStore:
                     status = excluded.status,
                     ok = excluded.ok,
                     updated_at = excluded.updated_at
+                WHERE execution_runs.workspace_id = excluded.workspace_id
                 """,
                 (
+                    workspace_id,
                     request_id,
                     memory_id,
                     thread_id,
@@ -458,6 +753,7 @@ class ExecutionEventStore:
     def _events_by_request(
         self,
         conn: sqlite3.Connection,
+        workspace_id: str,
         request_ids: list[str],
     ) -> dict[str, list[ExecutionEvent]]:
         if not request_ids:
@@ -467,10 +763,10 @@ class ExecutionEventStore:
             f"""
             SELECT *
             FROM execution_events
-            WHERE request_id IN ({placeholders})
+            WHERE workspace_id = ? AND request_id IN ({placeholders})
             ORDER BY id ASC
             """,
-            request_ids,
+            [workspace_id, *request_ids],
         ).fetchall()
         grouped: dict[str, list[ExecutionEvent]] = {
             request_id: [] for request_id in request_ids
@@ -482,8 +778,11 @@ class ExecutionEventStore:
         return grouped
 
     def _event_row_to_part(self, row: sqlite3.Row) -> ExecutionEvent:
+        event_id = self._optional_int(self._row_value(row, "id"))
         return {
-            "id": self._optional_int(self._row_value(row, "id")),
+            "id": event_id,
+            "runId": str(self._row_value(row, "request_id")),
+            "sequence": event_id or 0,
             "type": cast(ExecutionEventType, self._row_value(row, "type")),
             "state": cast(
                 ExecutionEventState | None,
@@ -509,6 +808,7 @@ class ExecutionEventStore:
             _ = conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS execution_runs (
+                    workspace_id TEXT NOT NULL,
                     request_id TEXT PRIMARY KEY,
                     memory_id TEXT NOT NULL,
                     thread_id TEXT,
@@ -522,6 +822,7 @@ class ExecutionEventStore:
 
                 CREATE TABLE IF NOT EXISTS execution_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    workspace_id TEXT NOT NULL,
                     request_id TEXT NOT NULL,
                     memory_id TEXT NOT NULL,
                     thread_id TEXT,
@@ -537,31 +838,32 @@ class ExecutionEventStore:
                     created_at TEXT NOT NULL
                 );
 
-                CREATE INDEX IF NOT EXISTS idx_execution_events_request
-                ON execution_events (request_id, id);
+                CREATE INDEX IF NOT EXISTS idx_execution_events_workspace_request
+                ON execution_events (workspace_id, request_id, id);
 
-                CREATE INDEX IF NOT EXISTS idx_execution_runs_updated
-                ON execution_runs (updated_at);
+                CREATE INDEX IF NOT EXISTS idx_execution_runs_workspace_updated
+                ON execution_runs (workspace_id, updated_at);
 
-                """
-            )
-            self._ensure_column(conn, "execution_runs", "thread_id", "TEXT")
-            self._ensure_column(conn, "execution_events", "thread_id", "TEXT")
-            _ = conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_execution_runs_thread_updated
-                ON execution_runs (thread_id, updated_at)
+                CREATE INDEX IF NOT EXISTS idx_execution_runs_workspace_thread_updated
+                ON execution_runs (workspace_id, thread_id, updated_at);
                 """
             )
             conn.commit()
 
-    def _ensure_column(
-        self, conn: sqlite3.Connection, table: str, column: str, definition: str
-    ) -> None:
-        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-        names = {str(row["name"]) for row in cast(list[sqlite3.Row], rows)}
-        if column not in names:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    def _next_sequence(self, workspace_id: str, request_id: str) -> int:
+        with self._connect() as conn:
+            raw = cast(object, conn.execute(
+                """
+                SELECT COALESCE(MAX(id), 0) + 1 AS sequence
+                FROM execution_events
+                WHERE workspace_id = ? AND request_id = ?
+                """,
+                (workspace_id, request_id),
+            ).fetchone())
+        if raw is None:
+            return 1
+        row = cast(Mapping[str, object], raw)
+        return int(cast(int, row["sequence"]))
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, check_same_thread=False)

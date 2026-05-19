@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import cast
 
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
@@ -23,7 +23,7 @@ def install_custom_openapi(app: FastAPI) -> None:
         app.openapi_schema = schema
         return app.openapi_schema
 
-    app.openapi = custom_openapi  # type: ignore[method-assign]
+    app.openapi = custom_openapi
 
 
 def _assign_stable_operation_ids(app: FastAPI) -> None:
@@ -45,25 +45,33 @@ def _normalize_error_responses(schema: dict[str, object]) -> None:
     components = schema.setdefault("components", {})
     if not isinstance(components, dict):
         return
-    schemas = components.setdefault("schemas", {})
-    if not isinstance(schemas, dict) or "ErrorResponse" not in schemas:
+    components_map = cast(dict[str, object], components)
+    schemas = components_map.setdefault("schemas", {})
+    if not isinstance(schemas, dict):
+        return
+    schemas_map = cast(dict[str, object], schemas)
+    if "ErrorResponse" not in schemas_map:
         return
 
     paths = schema.get("paths")
     if not isinstance(paths, dict):
         return
+    paths_map = cast(dict[str, object], paths)
     error_ref = {"$ref": "#/components/schemas/ErrorResponse"}
-    for path_item in paths.values():
+    for path_item in paths_map.values():
         if not isinstance(path_item, dict):
             continue
-        for operation in path_item.values():
+        path_item_map = cast(dict[str, object], path_item)
+        for operation in path_item_map.values():
             if not isinstance(operation, dict):
                 continue
-            responses = operation.setdefault("responses", {})
+            operation_map = cast(dict[str, object], operation)
+            responses = operation_map.setdefault("responses", {})
             if not isinstance(responses, dict):
                 continue
+            responses_map = cast(dict[str, object], responses)
             for status_code in ("400", "404", "422", "500"):
-                responses[status_code] = {
+                responses_map[status_code] = {
                     "description": "Error response",
                     "content": {"application/json": {"schema": error_ref}},
                 }

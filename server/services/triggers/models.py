@@ -11,6 +11,7 @@ class TriggerRecord(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(from_attributes=True)
 
     id: int
+    workspace_id: str
     agent_name: str
     payload: str
     start_time: str | None = None

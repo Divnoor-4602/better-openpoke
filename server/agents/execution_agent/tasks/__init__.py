@@ -3,24 +3,23 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
 
 from .search_email.schemas import get_schemas as _get_email_search_schemas
 from .search_email.tool import build_registry as _build_email_search_registry
 
 
 # Return tool schemas contributed by task modules
-def get_task_schemas() -> list[dict[str, Any]]:
+def get_task_schemas() -> list[dict[str, object]]:
     """Return tool schemas contributed by task modules."""
 
     return [*_get_email_search_schemas()]
 
 
 # Return executable task tools keyed by name
-def get_task_registry(agent_name: str) -> dict[str, Callable[..., Any]]:
+def get_task_registry(agent_name: str) -> dict[str, Callable[..., object]]:
     """Return executable task tools keyed by name."""
 
-    registry: dict[str, Callable[..., Any]] = {}
+    registry: dict[str, Callable[..., object]] = {}
     registry.update(_build_email_search_registry(agent_name))
     return registry
 

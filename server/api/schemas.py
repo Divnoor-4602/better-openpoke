@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, ClassVar, Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -13,13 +13,26 @@ class HealthResponse(BaseModel):
     version: str
 
 
+class MeResponse(BaseModel):
+    workspaceId: str
+
+
+class TimezoneSetRequest(BaseModel):
+    timezone: str = Field(min_length=1)
+
+
+class TimezoneResponse(BaseModel):
+    ok: bool = True
+    timezone: str
+
+
 class DeleteResponse(BaseModel):
     ok: bool = True
 
 
 class ThreadResource(BaseModel):
     threadId: str
-    title: str
+    title: str | None = None
     createdAt: str
     updatedAt: str
 
@@ -72,7 +85,7 @@ class UIMessage(BaseModel):
                 text_parts.append(part.text)
         return "".join(text_parts)
 
-    def serializable_parts(self) -> list[dict[str, Any]]:
+    def serializable_parts(self) -> list[dict[str, object]]:
         return [part.model_dump(mode="json") for part in self.parts]
 
 
@@ -83,6 +96,7 @@ class MessageResource(BaseModel):
     content: str
     parts: list[TextUIPart | GenericUIPart] = Field(default_factory=list)
     createdAt: str
+    turnIndex: int = 0
 
 
 class MessageCreateRequest(BaseModel):
@@ -98,8 +112,13 @@ class MessageListResponse(BaseModel):
     page: CursorPage
 
 
+NotificationPermission = Literal["granted", "default", "denied"]
+
+
 class MessageStreamRequest(BaseModel):
     messages: list[UIMessage] = Field(min_length=1)
+    timezone: str | None = Field(default=None, min_length=1)
+    notifications: NotificationPermission | None = Field(default=None)
 
 
 class StreamPartSchema(BaseModel):
@@ -110,22 +129,27 @@ class StreamPartSchema(BaseModel):
 
 class AgentRunEventResource(BaseModel):
     id: int | None
+    runId: str
+    sequence: int
     type: str
     state: str | None = None
     toolCallId: str | None = None
     toolName: str | None = None
     text: str | None = None
-    input: Any | None = None
-    output: Any | None = None
+    input: object | None = None
+    output: object | None = None
     error: str | None = None
     createdAt: str
 
 
 class AgentRunResource(BaseModel):
+    runId: str
     requestId: str
     memoryId: str
     threadId: str | None = None
     parentMemoryId: str | None = None
+    parentRunId: str | None = None
+    scope: Literal["interaction", "execution"] = "execution"
     title: str
     status: Literal["queued", "running", "completed", "failed"]
     ok: bool | None = None
@@ -151,7 +175,7 @@ class AgentRunCreateRequest(BaseModel):
     parentMemoryId: str | None = Field(default=None, max_length=200)
 
 
-Provider = Literal["gmail"]
+Provider = Literal["google"]
 
 
 class IntegrationConnectRequest(BaseModel):
@@ -159,6 +183,7 @@ class IntegrationConnectRequest(BaseModel):
 
     userId: str | None = Field(default=None, alias="userId")
     authConfigId: str | None = Field(default=None, alias="authConfigId")
+    returnTo: str | None = Field(default=None, alias="returnTo")
 
 
 class IntegrationConnectResponse(BaseModel):
@@ -181,7 +206,7 @@ class IntegrationStatusResponse(BaseModel):
     status: str
     email: str | None = None
     userId: str | None = None
-    profile: dict[str, Any] | None = None
+    profile: dict[str, object] | None = None
     profileSource: str
 
 
@@ -205,3 +230,53 @@ class IntegrationDisconnectResponse(BaseModel):
     def _default_warnings(cls, value: object) -> object:
         return [] if value is None else value
 
+
+class DraftUpdateRequest(BaseModel):
+    """Flat partial — all fields optional. Server omits ``None`` when building
+    the Composio ``message`` payload so unset fields are never cleared."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(populate_by_name=True)
+
+    subject: str | None = None
+    body: str | None = None
+    to: str | None = None
+    cc: list[str] | None = None
+    bcc: list[str] | None = None
+
+
+class DraftSendResponse(BaseModel):
+    ok: bool = True
+    status: Literal["sent"] = "sent"
+    threadId: str | None = None
+    messageId: str | None = None
+
+
+class DraftUpdateResponse(BaseModel):
+    ok: bool = True
+    draftId: str
+
+
+class DraftDiscardResponse(BaseModel):
+    ok: bool = True
+    status: Literal["discarded"] = "discarded"
+
+
+class CalendarEventUpdateRequest(BaseModel):
+    """Flat partial — all fields optional. Server omits ``None`` when
+    building the Composio payload so unset fields are never cleared."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(populate_by_name=True)
+
+    summary: str | None = None
+    description: str | None = None
+    attendees: list[str] | None = None
+
+
+class CalendarEventUpdateResponse(BaseModel):
+    ok: bool = True
+    eventId: str
+
+
+class CalendarEventDiscardResponse(BaseModel):
+    ok: bool = True
+    status: Literal["discarded"] = "discarded"

@@ -55,6 +55,14 @@ export type AgentRunEventResource = {
      */
     output?: unknown | null;
     /**
+     * Runid
+     */
+    runId: string;
+    /**
+     * Sequence
+     */
+    sequence: number;
+    /**
      * State
      */
     state?: string | null;
@@ -108,6 +116,10 @@ export type AgentRunResource = {
      */
     parentMemoryId?: string | null;
     /**
+     * Parentrunid
+     */
+    parentRunId?: string | null;
+    /**
      * Parts
      */
     parts?: Array<AgentRunEventResource>;
@@ -115,6 +127,14 @@ export type AgentRunResource = {
      * Requestid
      */
     requestId: string;
+    /**
+     * Runid
+     */
+    runId: string;
+    /**
+     * Scope
+     */
+    scope?: 'interaction' | 'execution';
     /**
      * Status
      */
@@ -141,6 +161,55 @@ export type AgentRunResponse = {
 };
 
 /**
+ * CalendarEventDiscardResponse
+ */
+export type CalendarEventDiscardResponse = {
+    /**
+     * Ok
+     */
+    ok?: boolean;
+    /**
+     * Status
+     */
+    status?: 'discarded';
+};
+
+/**
+ * CalendarEventUpdateRequest
+ *
+ * Flat partial — all fields optional. Server omits ``None`` when
+ * building the Composio payload so unset fields are never cleared.
+ */
+export type CalendarEventUpdateRequest = {
+    /**
+     * Attendees
+     */
+    attendees?: Array<string> | null;
+    /**
+     * Description
+     */
+    description?: string | null;
+    /**
+     * Summary
+     */
+    summary?: string | null;
+};
+
+/**
+ * CalendarEventUpdateResponse
+ */
+export type CalendarEventUpdateResponse = {
+    /**
+     * Eventid
+     */
+    eventId: string;
+    /**
+     * Ok
+     */
+    ok?: boolean;
+};
+
+/**
  * CursorPage
  */
 export type CursorPage = {
@@ -158,6 +227,85 @@ export type CursorPage = {
  * DeleteResponse
  */
 export type DeleteResponse = {
+    /**
+     * Ok
+     */
+    ok?: boolean;
+};
+
+/**
+ * DraftDiscardResponse
+ */
+export type DraftDiscardResponse = {
+    /**
+     * Ok
+     */
+    ok?: boolean;
+    /**
+     * Status
+     */
+    status?: 'discarded';
+};
+
+/**
+ * DraftSendResponse
+ */
+export type DraftSendResponse = {
+    /**
+     * Messageid
+     */
+    messageId?: string | null;
+    /**
+     * Ok
+     */
+    ok?: boolean;
+    /**
+     * Status
+     */
+    status?: 'sent';
+    /**
+     * Threadid
+     */
+    threadId?: string | null;
+};
+
+/**
+ * DraftUpdateRequest
+ *
+ * Flat partial — all fields optional. Server omits ``None`` when building
+ * the Composio ``message`` payload so unset fields are never cleared.
+ */
+export type DraftUpdateRequest = {
+    /**
+     * Bcc
+     */
+    bcc?: Array<string> | null;
+    /**
+     * Body
+     */
+    body?: string | null;
+    /**
+     * Cc
+     */
+    cc?: Array<string> | null;
+    /**
+     * Subject
+     */
+    subject?: string | null;
+    /**
+     * To
+     */
+    to?: string | null;
+};
+
+/**
+ * DraftUpdateResponse
+ */
+export type DraftUpdateResponse = {
+    /**
+     * Draftid
+     */
+    draftId: string;
     /**
      * Ok
      */
@@ -223,6 +371,10 @@ export type IntegrationConnectRequest = {
      * Authconfigid
      */
     authConfigId?: string | null;
+    /**
+     * Returnto
+     */
+    returnTo?: string | null;
     /**
      * Userid
      */
@@ -346,6 +498,16 @@ export type IntegrationStatusResponse = {
 };
 
 /**
+ * MeResponse
+ */
+export type MeResponse = {
+    /**
+     * Workspaceid
+     */
+    workspaceId: string;
+};
+
+/**
  * MessageCreateRequest
  */
 export type MessageCreateRequest = {
@@ -398,6 +560,10 @@ export type MessageResource = {
      * Threadid
      */
     threadId: string;
+    /**
+     * Turnindex
+     */
+    turnIndex?: number;
 };
 
 /**
@@ -408,6 +574,28 @@ export type MessageStreamRequest = {
      * Messages
      */
     messages: Array<UiMessage>;
+    /**
+     * Notifications
+     */
+    notifications?: 'granted' | 'default' | 'denied' | null;
+    /**
+     * Timezone
+     */
+    timezone?: string | null;
+};
+
+/**
+ * ResetResponse
+ */
+export type ResetResponse = {
+    /**
+     * Cleared
+     */
+    cleared: Array<string>;
+    /**
+     * Ok
+     */
+    ok: boolean;
 };
 
 /**
@@ -457,7 +645,7 @@ export type ThreadResource = {
     /**
      * Title
      */
-    title: string;
+    title?: string | null;
     /**
      * Updatedat
      */
@@ -479,6 +667,30 @@ export type ThreadUpdateRequest = {
      * Title
      */
     title: string;
+};
+
+/**
+ * TimezoneResponse
+ */
+export type TimezoneResponse = {
+    /**
+     * Ok
+     */
+    ok?: boolean;
+    /**
+     * Timezone
+     */
+    timezone: string;
+};
+
+/**
+ * TimezoneSetRequest
+ */
+export type TimezoneSetRequest = {
+    /**
+     * Timezone
+     */
+    timezone: string;
 };
 
 /**
@@ -504,6 +716,71 @@ export type UiMessage = {
     [key: string]: unknown;
 };
 
+/**
+ * WorkspaceListEntry
+ */
+export type WorkspaceListEntry = {
+    /**
+     * Firstip
+     */
+    firstIp?: string | null;
+    /**
+     * Firstseenat
+     */
+    firstSeenAt: string;
+    /**
+     * Workspaceid
+     */
+    workspaceId: string;
+};
+
+/**
+ * WorkspaceListResponse
+ */
+export type WorkspaceListResponse = {
+    /**
+     * Items
+     */
+    items: Array<WorkspaceListEntry>;
+};
+
+export type ListWorkspacesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/admin/workspaces';
+};
+
+export type ListWorkspacesErrors = {
+    /**
+     * Error response
+     */
+    400: ErrorResponse;
+    /**
+     * Error response
+     */
+    404: ErrorResponse;
+    /**
+     * Error response
+     */
+    422: ErrorResponse;
+    /**
+     * Error response
+     */
+    500: ErrorResponse;
+};
+
+export type ListWorkspacesError = ListWorkspacesErrors[keyof ListWorkspacesErrors];
+
+export type ListWorkspacesResponses = {
+    /**
+     * Successful Response
+     */
+    200: WorkspaceListResponse;
+};
+
+export type ListWorkspacesResponse = ListWorkspacesResponses[keyof ListWorkspacesResponses];
+
 export type ListAgentRunsData = {
     body?: never;
     path?: never;
@@ -522,19 +799,19 @@ export type ListAgentRunsData = {
 
 export type ListAgentRunsErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -564,19 +841,19 @@ export type RetrieveAgentRunData = {
 
 export type RetrieveAgentRunErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -611,19 +888,19 @@ export type StreamAgentRunEventsData = {
 
 export type StreamAgentRunEventsErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -632,10 +909,257 @@ export type StreamAgentRunEventsError = StreamAgentRunEventsErrors[keyof StreamA
 
 export type StreamAgentRunEventsResponses = {
     /**
-     * AI SDK UI message stream for agent run events
+     * AI SDK UI message stream containing data-agent-event lifecycle chunks and compatibility data-execution-event chunks
      */
     200: unknown;
 };
+
+export type DiscardCalendarEventData = {
+    body?: never;
+    path: {
+        /**
+         * Event Id
+         */
+        event_id: string;
+    };
+    query?: never;
+    url: '/api/calendar/events/{event_id}';
+};
+
+export type DiscardCalendarEventErrors = {
+    /**
+     * Error response
+     */
+    400: ErrorResponse;
+    /**
+     * Error response
+     */
+    404: ErrorResponse;
+    /**
+     * Error response
+     */
+    422: ErrorResponse;
+    /**
+     * Error response
+     */
+    500: ErrorResponse;
+};
+
+export type DiscardCalendarEventError = DiscardCalendarEventErrors[keyof DiscardCalendarEventErrors];
+
+export type DiscardCalendarEventResponses = {
+    /**
+     * Successful Response
+     */
+    200: CalendarEventDiscardResponse;
+};
+
+export type DiscardCalendarEventResponse = DiscardCalendarEventResponses[keyof DiscardCalendarEventResponses];
+
+export type UpdateCalendarEventData = {
+    body: CalendarEventUpdateRequest;
+    path: {
+        /**
+         * Event Id
+         */
+        event_id: string;
+    };
+    query?: never;
+    url: '/api/calendar/events/{event_id}';
+};
+
+export type UpdateCalendarEventErrors = {
+    /**
+     * Error response
+     */
+    400: ErrorResponse;
+    /**
+     * Error response
+     */
+    404: ErrorResponse;
+    /**
+     * Error response
+     */
+    422: ErrorResponse;
+    /**
+     * Error response
+     */
+    500: ErrorResponse;
+};
+
+export type UpdateCalendarEventError = UpdateCalendarEventErrors[keyof UpdateCalendarEventErrors];
+
+export type UpdateCalendarEventResponses = {
+    /**
+     * Successful Response
+     */
+    200: CalendarEventUpdateResponse;
+};
+
+export type UpdateCalendarEventResponse = UpdateCalendarEventResponses[keyof UpdateCalendarEventResponses];
+
+export type DevResetData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/dev/reset';
+};
+
+export type DevResetErrors = {
+    /**
+     * Error response
+     */
+    400: ErrorResponse;
+    /**
+     * Error response
+     */
+    404: ErrorResponse;
+    /**
+     * Error response
+     */
+    422: ErrorResponse;
+    /**
+     * Error response
+     */
+    500: ErrorResponse;
+};
+
+export type DevResetError = DevResetErrors[keyof DevResetErrors];
+
+export type DevResetResponses = {
+    /**
+     * Successful Response
+     */
+    200: ResetResponse;
+};
+
+export type DevResetResponse = DevResetResponses[keyof DevResetResponses];
+
+export type DiscardGmailDraftData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: never;
+    url: '/api/gmail/drafts/{draft_id}';
+};
+
+export type DiscardGmailDraftErrors = {
+    /**
+     * Error response
+     */
+    400: ErrorResponse;
+    /**
+     * Error response
+     */
+    404: ErrorResponse;
+    /**
+     * Error response
+     */
+    422: ErrorResponse;
+    /**
+     * Error response
+     */
+    500: ErrorResponse;
+};
+
+export type DiscardGmailDraftError = DiscardGmailDraftErrors[keyof DiscardGmailDraftErrors];
+
+export type DiscardGmailDraftResponses = {
+    /**
+     * Successful Response
+     */
+    200: DraftDiscardResponse;
+};
+
+export type DiscardGmailDraftResponse = DiscardGmailDraftResponses[keyof DiscardGmailDraftResponses];
+
+export type UpdateGmailDraftData = {
+    body: DraftUpdateRequest;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: never;
+    url: '/api/gmail/drafts/{draft_id}';
+};
+
+export type UpdateGmailDraftErrors = {
+    /**
+     * Error response
+     */
+    400: ErrorResponse;
+    /**
+     * Error response
+     */
+    404: ErrorResponse;
+    /**
+     * Error response
+     */
+    422: ErrorResponse;
+    /**
+     * Error response
+     */
+    500: ErrorResponse;
+};
+
+export type UpdateGmailDraftError = UpdateGmailDraftErrors[keyof UpdateGmailDraftErrors];
+
+export type UpdateGmailDraftResponses = {
+    /**
+     * Successful Response
+     */
+    200: DraftUpdateResponse;
+};
+
+export type UpdateGmailDraftResponse = UpdateGmailDraftResponses[keyof UpdateGmailDraftResponses];
+
+export type SendGmailDraftData = {
+    body?: never;
+    path: {
+        /**
+         * Draft Id
+         */
+        draft_id: string;
+    };
+    query?: never;
+    url: '/api/gmail/drafts/{draft_id}/send';
+};
+
+export type SendGmailDraftErrors = {
+    /**
+     * Error response
+     */
+    400: ErrorResponse;
+    /**
+     * Error response
+     */
+    404: ErrorResponse;
+    /**
+     * Error response
+     */
+    422: ErrorResponse;
+    /**
+     * Error response
+     */
+    500: ErrorResponse;
+};
+
+export type SendGmailDraftError = SendGmailDraftErrors[keyof SendGmailDraftErrors];
+
+export type SendGmailDraftResponses = {
+    /**
+     * Successful Response
+     */
+    200: DraftSendResponse;
+};
+
+export type SendGmailDraftResponse = SendGmailDraftResponses[keyof SendGmailDraftResponses];
 
 export type RetrieveHealthData = {
     body?: never;
@@ -646,19 +1170,19 @@ export type RetrieveHealthData = {
 
 export type RetrieveHealthErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -680,7 +1204,7 @@ export type ConnectIntegrationData = {
         /**
          * Provider
          */
-        provider: 'gmail';
+        provider: 'google';
     };
     query?: never;
     url: '/api/integrations/{provider}/connect';
@@ -688,19 +1212,19 @@ export type ConnectIntegrationData = {
 
 export type ConnectIntegrationErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -722,7 +1246,7 @@ export type DisconnectIntegrationData = {
         /**
          * Provider
          */
-        provider: 'gmail';
+        provider: 'google';
     };
     query?: never;
     url: '/api/integrations/{provider}/disconnect';
@@ -730,19 +1254,19 @@ export type DisconnectIntegrationData = {
 
 export type DisconnectIntegrationErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -764,7 +1288,7 @@ export type RetrieveIntegrationStatusData = {
         /**
          * Provider
          */
-        provider: 'gmail';
+        provider: 'google';
     };
     query?: never;
     url: '/api/integrations/{provider}/status';
@@ -772,19 +1296,19 @@ export type RetrieveIntegrationStatusData = {
 
 export type RetrieveIntegrationStatusErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -799,6 +1323,152 @@ export type RetrieveIntegrationStatusResponses = {
 };
 
 export type RetrieveIntegrationStatusResponse = RetrieveIntegrationStatusResponses[keyof RetrieveIntegrationStatusResponses];
+
+export type RetrieveMeData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/me';
+};
+
+export type RetrieveMeErrors = {
+    /**
+     * Error response
+     */
+    400: ErrorResponse;
+    /**
+     * Error response
+     */
+    404: ErrorResponse;
+    /**
+     * Error response
+     */
+    422: ErrorResponse;
+    /**
+     * Error response
+     */
+    500: ErrorResponse;
+};
+
+export type RetrieveMeError = RetrieveMeErrors[keyof RetrieveMeErrors];
+
+export type RetrieveMeResponses = {
+    /**
+     * Successful Response
+     */
+    200: MeResponse;
+};
+
+export type RetrieveMeResponse = RetrieveMeResponses[keyof RetrieveMeResponses];
+
+export type RetrieveTimezoneData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/meta/timezone';
+};
+
+export type RetrieveTimezoneErrors = {
+    /**
+     * Error response
+     */
+    400: ErrorResponse;
+    /**
+     * Error response
+     */
+    404: ErrorResponse;
+    /**
+     * Error response
+     */
+    422: ErrorResponse;
+    /**
+     * Error response
+     */
+    500: ErrorResponse;
+};
+
+export type RetrieveTimezoneError = RetrieveTimezoneErrors[keyof RetrieveTimezoneErrors];
+
+export type RetrieveTimezoneResponses = {
+    /**
+     * Successful Response
+     */
+    200: TimezoneResponse;
+};
+
+export type RetrieveTimezoneResponse = RetrieveTimezoneResponses[keyof RetrieveTimezoneResponses];
+
+export type SetTimezoneData = {
+    body: TimezoneSetRequest;
+    path?: never;
+    query?: never;
+    url: '/api/meta/timezone';
+};
+
+export type SetTimezoneErrors = {
+    /**
+     * Error response
+     */
+    400: ErrorResponse;
+    /**
+     * Error response
+     */
+    404: ErrorResponse;
+    /**
+     * Error response
+     */
+    422: ErrorResponse;
+    /**
+     * Error response
+     */
+    500: ErrorResponse;
+};
+
+export type SetTimezoneError = SetTimezoneErrors[keyof SetTimezoneErrors];
+
+export type SetTimezoneResponses = {
+    /**
+     * Successful Response
+     */
+    200: TimezoneResponse;
+};
+
+export type SetTimezoneResponse = SetTimezoneResponses[keyof SetTimezoneResponses];
+
+export type StreamReminderEventsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/reminders/events';
+};
+
+export type StreamReminderEventsErrors = {
+    /**
+     * Error response
+     */
+    400: ErrorResponse;
+    /**
+     * Error response
+     */
+    404: ErrorResponse;
+    /**
+     * Error response
+     */
+    422: ErrorResponse;
+    /**
+     * Error response
+     */
+    500: ErrorResponse;
+};
+
+export type StreamReminderEventsError = StreamReminderEventsErrors[keyof StreamReminderEventsErrors];
+
+export type StreamReminderEventsResponses = {
+    /**
+     * SSE stream of reminder.fired events for this workspace.
+     */
+    200: unknown;
+};
 
 export type ListThreadsData = {
     body?: never;
@@ -818,19 +1488,19 @@ export type ListThreadsData = {
 
 export type ListThreadsErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -855,19 +1525,19 @@ export type CreateThreadData = {
 
 export type CreateThreadErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -897,19 +1567,19 @@ export type DeleteThreadData = {
 
 export type DeleteThreadErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -939,19 +1609,19 @@ export type RetrieveThreadData = {
 
 export type RetrieveThreadErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -981,19 +1651,19 @@ export type UpdateThreadData = {
 
 export type UpdateThreadErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -1032,19 +1702,19 @@ export type ListThreadAgentRunsData = {
 
 export type ListThreadAgentRunsErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -1074,19 +1744,19 @@ export type CreateThreadAgentRunData = {
 
 export type CreateThreadAgentRunErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -1125,19 +1795,19 @@ export type ListThreadMessagesData = {
 
 export type ListThreadMessagesErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -1167,19 +1837,19 @@ export type CreateThreadMessageData = {
 
 export type CreateThreadMessageErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -1209,19 +1879,19 @@ export type StreamThreadMessageData = {
 
 export type StreamThreadMessageErrors = {
     /**
-     * Bad request
+     * Error response
      */
     400: ErrorResponse;
     /**
-     * Not found
+     * Error response
      */
     404: ErrorResponse;
     /**
-     * Validation error
+     * Error response
      */
     422: ErrorResponse;
     /**
-     * Internal server error
+     * Error response
      */
     500: ErrorResponse;
 };
@@ -1230,7 +1900,49 @@ export type StreamThreadMessageError = StreamThreadMessageErrors[keyof StreamThr
 
 export type StreamThreadMessageResponses = {
     /**
-     * AI SDK UI message stream
+     * AI SDK UI message stream containing text/reasoning/tool chunks and data-agent-event lifecycle chunks
      */
     200: unknown;
 };
+
+export type GenerateThreadTitleData = {
+    body?: never;
+    path: {
+        /**
+         * Threadid
+         */
+        threadId: string;
+    };
+    query?: never;
+    url: '/api/threads/{threadId}/title';
+};
+
+export type GenerateThreadTitleErrors = {
+    /**
+     * Error response
+     */
+    400: ErrorResponse;
+    /**
+     * Error response
+     */
+    404: ErrorResponse;
+    /**
+     * Error response
+     */
+    422: ErrorResponse;
+    /**
+     * Error response
+     */
+    500: ErrorResponse;
+};
+
+export type GenerateThreadTitleError = GenerateThreadTitleErrors[keyof GenerateThreadTitleErrors];
+
+export type GenerateThreadTitleResponses = {
+    /**
+     * Successful Response
+     */
+    200: ThreadResponse;
+};
+
+export type GenerateThreadTitleResponse = GenerateThreadTitleResponses[keyof GenerateThreadTitleResponses];

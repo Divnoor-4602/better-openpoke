@@ -26,6 +26,9 @@ const featureIsolationZones = featureDirs.map((featureName) => ({
 }))
 
 export default [
+  {
+    ignores: ['.output/**', 'dist/**', 'node_modules/**'],
+  },
   ...tanstackConfig,
   perfectionist.configs['recommended-natural'],
   eslintConfigPrettier,
@@ -63,6 +66,7 @@ export default [
       ...jsxA11y.configs.recommended.rules,
       '@typescript-eslint/array-type': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unnecessary-type-conversion': 'error',
       '@typescript-eslint/require-await': 'off',
       'import/default': 'off',
       'import/no-cycle': 'error',
@@ -88,6 +92,7 @@ export default [
           }
         : {}),
       'jsx-a11y/anchor-is-valid': 'off',
+      'jsx-a11y/no-autofocus': 'off',
       'pnpm/json-enforce-catalog': 'off',
       'prettier/prettier': ['error', {}, { usePrettierrc: true }],
       'react/prop-types': 'off',

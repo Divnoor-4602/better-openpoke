@@ -8,13 +8,19 @@ from html import escape, unescape
 from pathlib import Path
 from typing import cast
 
+from ....core.paths import get_data_dir
+from ....core.workspace_context import require_current_workspace
 from ....logging_config import logger
 from ....utils.timezones import now_in_user_timezone
 from .state import LogEntry, SummaryState
 
 
-_DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
-_WORKING_MEMORY_LOG_PATH = _DATA_DIR / "conversation" / "poke_working_memory.log"
+_DATA_DIR = get_data_dir()
+_WORKING_MEMORY_DIR = _DATA_DIR / "working_memory"
+
+
+def _working_memory_log_path(workspace_id: str) -> Path:
+    return _WORKING_MEMORY_DIR / workspace_id / "poke_working_memory.log"
 
 
 def _encode_payload(payload: str) -> str:
@@ -238,18 +244,35 @@ class WorkingMemoryLog:
         return tag, timestamp, _decode_payload(payload)
 
 
-_working_memory_log: WorkingMemoryLog | None = None
-_factory_lock = threading.Lock()
+_cache: dict[str, WorkingMemoryLog] = {}
+_cache_lock = threading.Lock()
 
 
-def get_working_memory_log() -> WorkingMemoryLog:
-    global _working_memory_log
-    if _working_memory_log is None:
-        with _factory_lock:
-            if _working_memory_log is None:
-                _working_memory_log = WorkingMemoryLog(_WORKING_MEMORY_LOG_PATH)
-    assert _working_memory_log is not None
-    return _working_memory_log
+def _resolve_workspace(workspace_id: str | None) -> str:
+    return workspace_id or require_current_workspace()
 
 
-__all__ = ["WorkingMemoryLog", "get_working_memory_log"]
+def get_working_memory_log(workspace_id: str | None = None) -> WorkingMemoryLog:
+    workspace_id = _resolve_workspace(workspace_id)
+    cached = _cache.get(workspace_id)
+    if cached is not None:
+        return cached
+    with _cache_lock:
+        cached = _cache.get(workspace_id)
+        if cached is None:
+            cached = WorkingMemoryLog(_working_memory_log_path(workspace_id))
+            _cache[workspace_id] = cached
+        return cached
+
+
+def reset_working_memory_log_cache() -> None:
+    """Test helper: drop the per-workspace cache."""
+    with _cache_lock:
+        _cache.clear()
+
+
+__all__ = [
+    "WorkingMemoryLog",
+    "get_working_memory_log",
+    "reset_working_memory_log_cache",
+]

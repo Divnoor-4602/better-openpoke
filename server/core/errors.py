@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import cast
 
-from fastapi import HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -14,12 +15,14 @@ from .request_id import get_request_id
 class ErrorResponse(BaseModel):
     ok: bool = Field(default=False)
     error: str
-    detail: Any | None = None
+    detail: object | None = None
     requestId: str
 
 
-def error_payload(request: Request, error: str, detail: Any | None = None) -> dict[str, Any]:
-    payload: dict[str, Any] = {
+def error_payload(
+    request: Request, error: str, detail: object | None = None
+) -> dict[str, object]:
+    payload: dict[str, object] = {
         "ok": False,
         "error": error,
         "requestId": get_request_id(request),
@@ -34,7 +37,7 @@ def error_response(
     error: str,
     *,
     status_code: int,
-    detail: Any | None = None,
+    detail: object | None = None,
 ) -> JSONResponse:
     return JSONResponse(
         error_payload(request, error, detail),
@@ -42,43 +45,41 @@ def error_response(
     )
 
 
-def register_exception_handlers(app: object) -> None:
-    from fastapi import FastAPI
-
-    fastapi_app = app if isinstance(app, FastAPI) else None
-    if fastapi_app is None:  # pragma: no cover - defensive
-        raise TypeError("register_exception_handlers requires a FastAPI app")
-
-    @fastapi_app.exception_handler(RequestValidationError)
+def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(RequestValidationError)
     async def _validation_exception_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        sanitized = _sanitize_validation_errors(exc.errors())
         logger.debug(
             "validation error",
-            extra={"errors": _sanitize_validation_errors(exc.errors()), "path": request.url.path},
+            extra={"errors": sanitized, "path": request.url.path},
         )
         return error_response(
             request,
             "Invalid request",
-            detail=exc.errors(),
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=sanitized,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
 
     _ = _validation_exception_handler
 
-    @fastapi_app.exception_handler(HTTPException)
+    @app.exception_handler(HTTPException)
     async def _http_exception_handler(
         request: Request, exc: HTTPException
     ) -> JSONResponse:
+        # Starlette types `detail` as `str | None`, but FastAPI handlers raise
+        # HTTPException with arbitrary JSON-shaped payloads in practice — so
+        # narrow via object before the isinstance branches.
+        detail: object = cast(object, exc.detail)
         logger.debug(
             "http error",
             extra={
-                "detail": _redact_detail(exc.detail),
+                "detail": _redact_detail(detail),
                 "status": exc.status_code,
                 "path": request.url.path,
             },
         )
-        detail = exc.detail
         message = detail if isinstance(detail, str) else "HTTP error"
         response_detail = None if isinstance(detail, str) else detail
         return error_response(
@@ -90,7 +91,7 @@ def register_exception_handlers(app: object) -> None:
 
     _ = _http_exception_handler
 
-    @fastapi_app.exception_handler(Exception)
+    @app.exception_handler(Exception)
     async def _unhandled_exception_handler(
         request: Request, exc: Exception
     ) -> JSONResponse:
@@ -105,7 +106,7 @@ def register_exception_handlers(app: object) -> None:
     _ = _unhandled_exception_handler
 
 
-ERROR_RESPONSES = {
+ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     400: {"model": ErrorResponse, "description": "Bad request"},
     404: {"model": ErrorResponse, "description": "Not found"},
     422: {"model": ErrorResponse, "description": "Validation error"},
@@ -113,10 +114,12 @@ ERROR_RESPONSES = {
 }
 
 
-def _sanitize_validation_errors(errors: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    sanitized_errors: list[dict[str, Any]] = []
+def _sanitize_validation_errors(
+    errors: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    sanitized_errors: list[dict[str, object]] = []
     for error in errors:
-        sanitized = {
+        sanitized: dict[str, object] = {
             key: value
             for key, value in error.items()
             if key not in {"input", "ctx"}
@@ -125,17 +128,20 @@ def _sanitize_validation_errors(errors: list[dict[str, Any]]) -> list[dict[str, 
     return sanitized_errors
 
 
-def _redact_detail(detail: Any) -> Any:
+def _redact_detail(detail: object) -> object:
     if isinstance(detail, list):
+        detail_list = cast(list[object], detail)
+        items: list[object] = [_redact_detail(item) for item in detail_list]
         return {
             "type": "list",
-            "count": len(detail),
-            "items": [_redact_detail(item) for item in detail],
+            "count": len(detail_list),
+            "items": items,
         }
     if isinstance(detail, dict):
+        detail_dict = cast(dict[object, object], detail)
         return {
             key: _redact_detail(value)
-            for key, value in detail.items()
+            for key, value in detail_dict.items()
             if key not in {"input", "ctx"}
         }
     return {"type": type(detail).__name__}

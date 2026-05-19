@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from html import escape
 from pathlib import Path
+from typing import cast
 
 from ...config import get_settings
 from ...logging_config import logger
@@ -15,9 +16,17 @@ SYSTEM_PROMPT = _prompt_path.read_text(encoding="utf-8").strip()
 
 
 # Load and return the pre-defined system prompt from markdown file
-def build_system_prompt() -> str:
-    """Return the static system prompt for the interaction agent."""
-    return SYSTEM_PROMPT
+def build_system_prompt(notifications: str | None = None) -> str:
+    """Return the system prompt for the interaction agent.
+
+    ``notifications`` is the browser's ``Notification.permission`` value
+    ("granted" | "default" | "denied") as snapshotted at request time. It
+    governs how the agent confirms a freshly-scheduled reminder.
+    """
+    state = (notifications or "default").lower()
+    if state not in {"granted", "default", "denied"}:
+        state = "default"
+    return f"{SYSTEM_PROMPT}\n\n<notification_permission>{state}</notification_permission>"
 
 
 # Build structured message with conversation history, relevant memories, and current turn
@@ -47,7 +56,7 @@ def prepare_message_with_history(
         }
         if include_content:
             extra.update({"latest_text": latest_text, "prompt_content": content})
-        logger.info(
+        logger.debug(
             "Interaction prompt with reranked memories",
             extra=extra,
         )
@@ -80,13 +89,14 @@ def _render_active_execution_runs() -> str:
 
     rendered: list[str] = []
     for run in runs[:12]:
-        latest_event = (run.get("parts") or [])[-1] if run.get("parts") else {}
+        parts = run.get("parts") or []
         latest_text = ""
-        if isinstance(latest_event, dict):
+        if parts:
+            event_map = cast(dict[str, object], cast(object, parts[-1]))
             latest_text = str(
-                latest_event.get("text")
-                or latest_event.get("toolName")
-                or latest_event.get("state")
+                event_map.get("text")
+                or event_map.get("toolName")
+                or event_map.get("state")
                 or ""
             )
         rendered.append(
@@ -103,7 +113,9 @@ def _render_active_execution_runs() -> str:
                 ]
             )
         )
-    return f"<active_execution_runs>\n{chr(10).join(rendered)}\n</active_execution_runs>"
+    return (
+        f"<active_execution_runs>\n{chr(10).join(rendered)}\n</active_execution_runs>"
+    )
 
 
 # Format relevant memories into XML tags for LLM awareness
@@ -121,7 +133,7 @@ def _render_relevant_memories(query: str) -> str:
         query=query, memories=memories, rendered_content=rendered_content
     )
 
-    logger.info(
+    logger.debug(
         "Prompt memory search results",
         extra={
             "query_length": len(query),
@@ -200,7 +212,7 @@ def _log_prompt_memories(
             ]
         )
     lines.append("</prompt_memories>")
-    logger.info("\n".join(lines))
+    logger.debug("\n".join(lines))
 
 
 def _render_memory_result(result: MemorySearchResult, rank: int) -> str:

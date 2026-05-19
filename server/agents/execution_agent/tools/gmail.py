@@ -5,15 +5,17 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from functools import partial
-from typing import Any
 
 from server.services.execution import get_execution_agent_logs
-from server.services.gmail.client import execute_gmail_tool, get_active_gmail_user_id
+from server.services.gmail.client import (
+    execute_google_tool,
+    resolve_workspace_gmail_user_id,
+)
 from server.services.memory import record_gmail_tool_result
 
 _GMAIL_AGENT_NAME = "gmail-execution-agent"
 
-_SCHEMAS: list[dict[str, Any]] = [
+_SCHEMAS: list[dict[str, object]] = [
     {
         "type": "function",
         "function": {
@@ -58,9 +60,18 @@ _SCHEMAS: list[dict[str, Any]] = [
                         "type": "object",
                         "description": "Single attachment metadata (requires Composio-uploaded asset).",
                         "properties": {
-                            "s3key": {"type": "string", "description": "S3 key of uploaded file."},
-                            "name": {"type": "string", "description": "Attachment filename."},
-                            "mimetype": {"type": "string", "description": "Attachment MIME type."},
+                            "s3key": {
+                                "type": "string",
+                                "description": "S3 key of uploaded file.",
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "Attachment filename.",
+                            },
+                            "mimetype": {
+                                "type": "string",
+                                "description": "Attachment MIME type.",
+                            },
                         },
                         "required": ["s3key", "name", "mimetype"],
                     },
@@ -157,9 +168,18 @@ _SCHEMAS: list[dict[str, Any]] = [
                         "type": "object",
                         "description": "Single attachment metadata (requires Composio-uploaded asset).",
                         "properties": {
-                            "s3key": {"type": "string", "description": "S3 key of uploaded file."},
-                            "name": {"type": "string", "description": "Attachment filename."},
-                            "mimetype": {"type": "string", "description": "Attachment MIME type."},
+                            "s3key": {
+                                "type": "string",
+                                "description": "S3 key of uploaded file.",
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "Attachment filename.",
+                            },
+                            "mimetype": {
+                                "type": "string",
+                                "description": "Attachment MIME type.",
+                            },
                         },
                         "required": ["s3key", "name", "mimetype"],
                     },
@@ -281,6 +301,89 @@ _SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "gmail_fetch_emails",
+            "description": "Search/browse the user's Gmail inbox by query (e.g. 'from:alice subject:budget', 'is:unread', 'after:2025/05/01'). Returns compact metadata only: subject, sender, recipient, internalDate, short snippet, labels, attachment flag. Use this to FIND messages; do NOT use it to read full bodies — when you need a body, call gmail_fetch_message_by_id with the messageId from these results. Keep max_results small (3-7) to minimize latency. Setting include_payload=true is rarely needed and slow.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Gmail search query string using Gmail's standard search operators (from:, to:, subject:, label:, is:, has:, after:, before:, etc.).",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of messages to return (default 5). Keep between 3 and 10 for low-latency browses; raise only when the user explicitly asks for more.",
+                    },
+                    "label_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Filter by label IDs (e.g. ['INBOX', 'UNREAD']). System labels are uppercase; custom labels are Label_<id>.",
+                    },
+                    "include_payload": {
+                        "type": "boolean",
+                        "description": "Defaults to false. Leave false for browse/search; output is metadata only regardless. Only set true if you specifically need raw MIME parts inline — note the response will still be summarised; prefer gmail_fetch_message_by_id with format='full' for reading bodies.",
+                    },
+                    "page_token": {
+                        "type": "string",
+                        "description": "Pagination token from a previous response's nextPageToken.",
+                    },
+                    "ids_only": {
+                        "type": "boolean",
+                        "description": "Return only message and thread IDs (fastest). Use when chaining to gmail_fetch_message_by_id.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "gmail_fetch_message_by_id",
+            "description": "Fetch a single Gmail message by its message ID. Use format='full' to retrieve complete headers and body content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message_id": {
+                        "type": "string",
+                        "description": "Gmail message ID (15-16 char hex string from gmail_fetch_emails results).",
+                    },
+                    "format": {
+                        "type": "string",
+                        "enum": ["minimal", "metadata", "full", "raw"],
+                        "description": "Level of detail. 'metadata' (default) returns headers without body; 'full' returns parsed body; 'raw' returns base64url RFC 2822 message; 'minimal' returns IDs and labels only.",
+                    },
+                },
+                "required": ["message_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "gmail_fetch_thread",
+            "description": "Fetch all messages in a Gmail thread by thread ID. Use to read a full conversation before replying.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "thread_id": {
+                        "type": "string",
+                        "description": "Gmail thread ID (hex string from gmail_fetch_emails or gmail_list_drafts results).",
+                    },
+                    "page_token": {
+                        "type": "string",
+                        "description": "Pagination token for long threads.",
+                    },
+                },
+                "required": ["thread_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "gmail_search_people",
             "description": "Search Google contacts and other people records associated with the Gmail account.",
             "parameters": {
@@ -314,11 +417,11 @@ _SCHEMAS: list[dict[str, Any]] = [
     },
 ]
 
-_LOG_STORE = get_execution_agent_logs()
+# Per-workspace log lookup deferred to call time (no module-level capture).
 
 
 # Return Gmail tool schemas
-def get_schemas() -> list[dict[str, Any]]:
+def get_schemas() -> list[dict[str, object]]:
     """Return Gmail tool schemas."""
 
     return _SCHEMAS
@@ -328,35 +431,37 @@ def get_schemas() -> list[dict[str, Any]]:
 def _execute(
     tool_name: str,
     composio_user_id: str,
-    arguments: dict[str, Any],
+    arguments: dict[str, object],
     memory_id: str | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Execute a Gmail tool and record the action for the execution agent journal."""
 
     payload = {k: v for k, v in arguments.items() if v is not None}
-    payload_str = json.dumps(payload, ensure_ascii=False, sort_keys=True) if payload else "{}"
+    payload_str = (
+        json.dumps(payload, ensure_ascii=False, sort_keys=True) if payload else "{}"
+    )
     try:
-        result = execute_gmail_tool(tool_name, composio_user_id, arguments=payload)
+        result = execute_google_tool(tool_name, composio_user_id, arguments=payload)
     except Exception as exc:
-        _LOG_STORE.record_action(
+        get_execution_agent_logs().record_action(
             _GMAIL_AGENT_NAME,
             description=f"{tool_name} failed | args={payload_str} | error={exc}",
         )
         raise
 
-    _LOG_STORE.record_action(
+    get_execution_agent_logs().record_action(
         _GMAIL_AGENT_NAME,
         description=f"{tool_name} succeeded | args={payload_str}",
     )
     try:
-        record_gmail_tool_result(
+        _ = record_gmail_tool_result(
             tool_name=tool_name,
             result=result,
             arguments=payload,
             memory_id=memory_id,
         )
     except Exception as exc:  # pragma: no cover - memory should not break Gmail tools
-        _LOG_STORE.record_action(
+        get_execution_agent_logs().record_action(
             _GMAIL_AGENT_NAME,
             description=f"{tool_name} memory recording failed | error={exc}",
         )
@@ -373,10 +478,10 @@ def gmail_create_draft(
     extra_recipients: list[str] | None = None,
     is_html: bool | None = None,
     thread_id: str | None = None,
-    attachment: dict[str, Any] | None = None,
+    attachment: dict[str, object] | None = None,
     memory_id: str | None = None,
-) -> dict[str, Any]:
-    arguments: dict[str, Any] = {
+) -> dict[str, object]:
+    arguments: dict[str, object] = {
         "recipient_email": recipient_email,
         "subject": subject,
         "body": body,
@@ -387,22 +492,24 @@ def gmail_create_draft(
         "thread_id": thread_id,
         "attachment": attachment,
     }
-    composio_user_id = get_active_gmail_user_id()
+    composio_user_id = resolve_workspace_gmail_user_id()
     if not composio_user_id:
         return {"error": "Gmail not connected. Please connect Gmail in settings first."}
-    return _execute("GMAIL_CREATE_EMAIL_DRAFT", composio_user_id, arguments, memory_id)
+    return _execute(
+        "GOOGLESUPER_CREATE_EMAIL_DRAFT", composio_user_id, arguments, memory_id
+    )
 
 
 # Send a previously created Gmail draft using Composio
 def gmail_execute_draft(
     draft_id: str,
     memory_id: str | None = None,
-) -> dict[str, Any]:
-    arguments: dict[str, Any] = {"draft_id": draft_id}
-    composio_user_id = get_active_gmail_user_id()
+) -> dict[str, object]:
+    arguments: dict[str, object] = {"draft_id": draft_id}
+    composio_user_id = resolve_workspace_gmail_user_id()
     if not composio_user_id:
         return {"error": "Gmail not connected. Please connect Gmail in settings first."}
-    return _execute("GMAIL_SEND_DRAFT", composio_user_id, arguments, memory_id)
+    return _execute("GOOGLESUPER_SEND_DRAFT", composio_user_id, arguments, memory_id)
 
 
 # Forward an existing Gmail message with optional additional context
@@ -411,16 +518,18 @@ def gmail_forward_email(
     recipient_email: str,
     additional_text: str | None = None,
     memory_id: str | None = None,
-) -> dict[str, Any]:
-    arguments: dict[str, Any] = {
+) -> dict[str, object]:
+    arguments: dict[str, object] = {
         "message_id": message_id,
         "recipient_email": recipient_email,
         "additional_text": additional_text,
     }
-    composio_user_id = get_active_gmail_user_id()
+    composio_user_id = resolve_workspace_gmail_user_id()
     if not composio_user_id:
         return {"error": "Gmail not connected. Please connect Gmail in settings first."}
-    return _execute("GMAIL_FORWARD_MESSAGE", composio_user_id, arguments, memory_id)
+    return _execute(
+        "GOOGLESUPER_FORWARD_MESSAGE", composio_user_id, arguments, memory_id
+    )
 
 
 # Send a reply within an existing Gmail thread via Composio
@@ -432,10 +541,10 @@ def gmail_reply_to_thread(
     bcc: list[str] | None = None,
     extra_recipients: list[str] | None = None,
     is_html: bool | None = None,
-    attachment: dict[str, Any] | None = None,
+    attachment: dict[str, object] | None = None,
     memory_id: str | None = None,
-) -> dict[str, Any]:
-    arguments: dict[str, Any] = {
+) -> dict[str, object]:
+    arguments: dict[str, object] = {
         "thread_id": thread_id,
         "recipient_email": recipient_email,
         "message_body": message_body,
@@ -445,22 +554,24 @@ def gmail_reply_to_thread(
         "is_html": is_html,
         "attachment": attachment,
     }
-    composio_user_id = get_active_gmail_user_id()
+    composio_user_id = resolve_workspace_gmail_user_id()
     if not composio_user_id:
         return {"error": "Gmail not connected. Please connect Gmail in settings first."}
-    return _execute("GMAIL_REPLY_TO_THREAD", composio_user_id, arguments, memory_id)
+    return _execute(
+        "GOOGLESUPER_REPLY_TO_THREAD", composio_user_id, arguments, memory_id
+    )
 
 
 # Delete a specific Gmail draft using the Composio Gmail integration
 def gmail_delete_draft(
     draft_id: str,
     memory_id: str | None = None,
-) -> dict[str, Any]:
-    arguments: dict[str, Any] = {"draft_id": draft_id}
-    composio_user_id = get_active_gmail_user_id()
+) -> dict[str, object]:
+    arguments: dict[str, object] = {"draft_id": draft_id}
+    composio_user_id = resolve_workspace_gmail_user_id()
     if not composio_user_id:
         return {"error": "Gmail not connected. Please connect Gmail in settings first."}
-    return _execute("GMAIL_DELETE_DRAFT", composio_user_id, arguments, memory_id)
+    return _execute("GOOGLESUPER_DELETE_DRAFT", composio_user_id, arguments, memory_id)
 
 
 def gmail_get_contacts(
@@ -469,17 +580,17 @@ def gmail_get_contacts(
     include_other_contacts: bool | None = None,
     page_token: str | None = None,
     memory_id: str | None = None,
-) -> dict[str, Any]:
-    arguments: dict[str, Any] = {
+) -> dict[str, object]:
+    arguments: dict[str, object] = {
         "resource_name": resource_name,
         "person_fields": person_fields,
         "include_other_contacts": include_other_contacts,
         "page_token": page_token,
     }
-    composio_user_id = get_active_gmail_user_id()
+    composio_user_id = resolve_workspace_gmail_user_id()
     if not composio_user_id:
         return {"error": "Gmail not connected. Please connect Gmail in settings first."}
-    return _execute("GMAIL_GET_CONTACTS", composio_user_id, arguments, memory_id)
+    return _execute("GOOGLESUPER_GET_CONTACTS", composio_user_id, arguments, memory_id)
 
 
 def gmail_get_people(
@@ -490,8 +601,8 @@ def gmail_get_people(
     sync_token: str | None = None,
     other_contacts: bool | None = None,
     memory_id: str | None = None,
-) -> dict[str, Any]:
-    arguments: dict[str, Any] = {
+) -> dict[str, object]:
+    arguments: dict[str, object] = {
         "resource_name": resource_name,
         "person_fields": person_fields,
         "page_size": page_size,
@@ -499,10 +610,10 @@ def gmail_get_people(
         "sync_token": sync_token,
         "other_contacts": other_contacts,
     }
-    composio_user_id = get_active_gmail_user_id()
+    composio_user_id = resolve_workspace_gmail_user_id()
     if not composio_user_id:
         return {"error": "Gmail not connected. Please connect Gmail in settings first."}
-    return _execute("GMAIL_GET_PEOPLE", composio_user_id, arguments, memory_id)
+    return _execute("GOOGLESUPER_GET_PEOPLE", composio_user_id, arguments, memory_id)
 
 
 def gmail_list_drafts(
@@ -510,16 +621,76 @@ def gmail_list_drafts(
     page_token: str | None = None,
     verbose: bool | None = None,
     memory_id: str | None = None,
-) -> dict[str, Any]:
-    arguments: dict[str, Any] = {
+) -> dict[str, object]:
+    arguments: dict[str, object] = {
         "max_results": max_results,
         "page_token": page_token,
         "verbose": verbose,
     }
-    composio_user_id = get_active_gmail_user_id()
+    composio_user_id = resolve_workspace_gmail_user_id()
     if not composio_user_id:
         return {"error": "Gmail not connected. Please connect Gmail in settings first."}
-    return _execute("GMAIL_LIST_DRAFTS", composio_user_id, arguments, memory_id)
+    return _execute("GOOGLESUPER_LIST_DRAFTS", composio_user_id, arguments, memory_id)
+
+
+def gmail_fetch_emails(
+    query: str | None = None,
+    max_results: int | None = 5,
+    label_ids: list[str] | None = None,
+    include_payload: bool | None = None,
+    page_token: str | None = None,
+    ids_only: bool | None = None,
+    memory_id: str | None = None,
+) -> dict[str, object]:
+    arguments: dict[str, object] = {
+        "query": query,
+        "max_results": max_results,
+        "label_ids": label_ids,
+        "include_payload": include_payload,
+        "page_token": page_token,
+        "ids_only": ids_only,
+    }
+    composio_user_id = resolve_workspace_gmail_user_id()
+    if not composio_user_id:
+        return {"error": "Gmail not connected. Please connect Gmail in settings first."}
+    return _execute("GOOGLESUPER_FETCH_EMAILS", composio_user_id, arguments, memory_id)
+
+
+def gmail_fetch_message_by_id(
+    message_id: str,
+    format: str | None = None,
+    memory_id: str | None = None,
+) -> dict[str, object]:
+    arguments: dict[str, object] = {
+        "message_id": message_id,
+        "format": format,
+    }
+    composio_user_id = resolve_workspace_gmail_user_id()
+    if not composio_user_id:
+        return {"error": "Gmail not connected. Please connect Gmail in settings first."}
+    return _execute(
+        "GOOGLESUPER_FETCH_MESSAGE_BY_MESSAGE_ID",
+        composio_user_id,
+        arguments,
+        memory_id,
+    )
+
+
+def gmail_fetch_thread(
+    thread_id: str,
+    page_token: str | None = None,
+    memory_id: str | None = None,
+) -> dict[str, object]:
+    arguments: dict[str, object] = {
+        "thread_id": thread_id,
+        "page_token": page_token,
+    }
+    composio_user_id = resolve_workspace_gmail_user_id()
+    if not composio_user_id:
+        return {"error": "Gmail not connected. Please connect Gmail in settings first."}
+    return _execute(
+        "GOOGLESUPER_FETCH_MESSAGE_BY_THREAD_ID", composio_user_id, arguments, memory_id
+    )
 
 
 def gmail_search_people(
@@ -529,8 +700,8 @@ def gmail_search_people(
     other_contacts: bool | None = None,
     page_token: str | None = None,
     memory_id: str | None = None,
-) -> dict[str, Any]:
-    arguments: dict[str, Any] = {
+) -> dict[str, object]:
+    arguments: dict[str, object] = {
         "query": query,
         "person_fields": person_fields,
         "other_contacts": other_contacts,
@@ -539,10 +710,10 @@ def gmail_search_people(
         arguments["pageSize"] = page_size
     if page_token is not None:
         arguments["pageToken"] = page_token
-    composio_user_id = get_active_gmail_user_id()
+    composio_user_id = resolve_workspace_gmail_user_id()
     if not composio_user_id:
         return {"error": "Gmail not connected. Please connect Gmail in settings first."}
-    return _execute("GMAIL_SEARCH_PEOPLE", composio_user_id, arguments, memory_id)
+    return _execute("GOOGLESUPER_SEARCH_PEOPLE", composio_user_id, arguments, memory_id)
 
 
 # Return Gmail tool callables
@@ -559,6 +730,11 @@ def build_registry(agent_name: str) -> dict[str, Callable[..., object]]:
         "gmail_get_people": partial(gmail_get_people, memory_id=agent_name),
         "gmail_list_drafts": partial(gmail_list_drafts, memory_id=agent_name),
         "gmail_search_people": partial(gmail_search_people, memory_id=agent_name),
+        "gmail_fetch_emails": partial(gmail_fetch_emails, memory_id=agent_name),
+        "gmail_fetch_message_by_id": partial(
+            gmail_fetch_message_by_id, memory_id=agent_name
+        ),
+        "gmail_fetch_thread": partial(gmail_fetch_thread, memory_id=agent_name),
     }
 
 
@@ -574,4 +750,7 @@ __all__ = [
     "gmail_get_people",
     "gmail_list_drafts",
     "gmail_search_people",
+    "gmail_fetch_emails",
+    "gmail_fetch_message_by_id",
+    "gmail_fetch_thread",
 ]

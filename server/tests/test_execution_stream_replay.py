@@ -3,20 +3,32 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from server.agents.interaction_agent.runtime import InteractionResult
+from server.agents.interaction_agent.runtime import (
+    InteractionAgentRuntime,
+    InteractionResult,
+)
 from server.routes import execution
+
+# pyright: reportPrivateUsage=false
 from server.services.execution import ExecutionEventPayload
 
 
 def _agent_response_payload() -> ExecutionEventPayload:
     return {
+        "workspaceId": "ws-test",
+        "runId": "req-1",
         "requestId": "req-1",
         "memoryId": "mem-1",
+        "threadId": None,
         "parentMemoryId": None,
+        "parentRunId": None,
+        "scope": "execution",
         "title": "Task",
         "event": {
             "id": 1,
-            "type": "agent-response",
+            "runId": "req-1",
+            "sequence": 1,
+            "type": "message.created",
             "state": "output-available",
             "toolCallId": None,
             "toolName": None,
@@ -35,7 +47,7 @@ class ExecutionStreamReplayTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         handle_agent_message = AsyncMock()
         with patch.object(
-            execution.InteractionAgentRuntime,
+            InteractionAgentRuntime,
             "handle_agent_message",
             handle_agent_message,
         ):
@@ -47,8 +59,9 @@ class ExecutionStreamReplayTests(unittest.IsolatedAsyncioTestCase):
                 )
             ]
 
-        self.assertEqual(len(chunks), 1)
-        self.assertIn("data-execution-event", chunks[0])
+        self.assertEqual(len(chunks), 2)
+        self.assertIn("data-agent-event", chunks[0])
+        self.assertIn("data-execution-event", chunks[1])
         handle_agent_message.assert_not_awaited()
 
     async def test_live_execution_events_can_generate_interaction_reply(self) -> None:
@@ -59,7 +72,7 @@ class ExecutionStreamReplayTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         with patch.object(
-            execution.InteractionAgentRuntime,
+            InteractionAgentRuntime,
             "handle_agent_message",
             handle_agent_message,
         ):
@@ -72,10 +85,11 @@ class ExecutionStreamReplayTests(unittest.IsolatedAsyncioTestCase):
             ]
 
         self.assertGreater(len(chunks), 1)
-        self.assertIn("data-execution-event", chunks[0])
+        self.assertIn("data-agent-event", chunks[0])
+        self.assertIn("data-execution-event", chunks[1])
         self.assertTrue(any("text-delta" in chunk for chunk in chunks))
         handle_agent_message.assert_awaited_once()
 
 
 if __name__ == "__main__":
-    unittest.main()
+    _ = unittest.main()

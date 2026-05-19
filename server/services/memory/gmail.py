@@ -1,12 +1,11 @@
 """Helpers for turning compact Gmail tool payloads into memory events."""
-# pyright: reportAny=false, reportExplicitAny=false, reportUnknownArgumentType=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportPrivateUsage=false, reportUnusedCallResult=false, reportUnnecessaryIsInstance=false
+# pyright: reportUnknownArgumentType=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportPrivateUsage=false, reportUnusedCallResult=false, reportUnnecessaryIsInstance=false
 
 from __future__ import annotations
 
 import re
 import uuid
 from collections.abc import Iterable
-from typing import Any
 
 from .store import MemoryLink, MemoryRecord, MemoryStore, get_memory_store
 
@@ -16,8 +15,8 @@ _NUMBER_PATTERN = re.compile(r"\b\d{6,}\b")
 def record_gmail_tool_result(
     *,
     tool_name: str,
-    result: dict[str, Any],
-    arguments: dict[str, Any] | None = None,
+    result: dict[str, object],
+    arguments: dict[str, object] | None = None,
     memory_id: str | None = None,
     store: MemoryStore | None = None,
 ) -> list[str]:
@@ -25,7 +24,7 @@ def record_gmail_tool_result(
     memory_store = store or get_memory_store()
     recorded_memory_ids: list[str] = []
 
-    if tool_name == "GMAIL_FETCH_EMAILS":
+    if tool_name == "GOOGLESUPER_FETCH_EMAILS":
         for message in _extract_messages(result):
             memory = record_gmail_message(
                 message, memory_id=memory_id, store=memory_store
@@ -34,7 +33,7 @@ def record_gmail_tool_result(
                 recorded_memory_ids.append(memory.memory_id)
         return recorded_memory_ids
 
-    if tool_name == "GMAIL_CREATE_EMAIL_DRAFT":
+    if tool_name == "GOOGLESUPER_CREATE_EMAIL_DRAFT":
         memory = _record_gmail_action(
             event_type="gmail_draft_created",
             tool_name=tool_name,
@@ -47,7 +46,7 @@ def record_gmail_tool_result(
             recorded_memory_ids.append(memory.memory_id)
         return recorded_memory_ids
 
-    if tool_name == "GMAIL_REPLY_TO_THREAD":
+    if tool_name == "GOOGLESUPER_REPLY_TO_THREAD":
         memory = _record_gmail_action(
             event_type="gmail_reply_sent",
             tool_name=tool_name,
@@ -60,9 +59,40 @@ def record_gmail_tool_result(
             recorded_memory_ids.append(memory.memory_id)
         return recorded_memory_ids
 
-    if tool_name == "GMAIL_SEND_DRAFT":
+    if tool_name == "GOOGLESUPER_SEND_DRAFT":
         memory = _record_gmail_action(
             event_type="gmail_draft_sent",
+            tool_name=tool_name,
+            result=result,
+            arguments=arguments,
+            memory_id=memory_id,
+            store=memory_store,
+        )
+        if memory:
+            recorded_memory_ids.append(memory.memory_id)
+        return recorded_memory_ids
+
+    if tool_name == "GOOGLESUPER_FETCH_MESSAGE_BY_THREAD_ID":
+        for message in _extract_messages(result):
+            memory = record_gmail_message(
+                message, memory_id=memory_id, store=memory_store
+            )
+            if memory.memory_id not in recorded_memory_ids:
+                recorded_memory_ids.append(memory.memory_id)
+        return recorded_memory_ids
+
+    if tool_name == "GOOGLESUPER_FETCH_MESSAGE_BY_MESSAGE_ID":
+        for message in _extract_single_or_messages(result):
+            memory = record_gmail_message(
+                message, memory_id=memory_id, store=memory_store
+            )
+            if memory.memory_id not in recorded_memory_ids:
+                recorded_memory_ids.append(memory.memory_id)
+        return recorded_memory_ids
+
+    if tool_name == "GOOGLESUPER_FORWARD_MESSAGE":
+        memory = _record_gmail_action(
+            event_type="gmail_message_forwarded",
             tool_name=tool_name,
             result=result,
             arguments=arguments,
@@ -77,7 +107,7 @@ def record_gmail_tool_result(
 
 
 def record_gmail_message(
-    message: dict[str, Any],
+    message: dict[str, object],
     *,
     memory_id: str | None = None,
     store: MemoryStore | None = None,
@@ -138,7 +168,7 @@ def record_gmail_message(
         )
         memory_id = memory.memory_id
 
-    metadata = {
+    metadata: dict[str, object] = {
         "message_id": message_id,
         "thread_id": thread_id,
         "subject": subject,
@@ -165,8 +195,8 @@ def _record_gmail_action(
     *,
     event_type: str,
     tool_name: str,
-    result: dict[str, Any],
-    arguments: dict[str, Any] | None,
+    result: dict[str, object],
+    arguments: dict[str, object] | None,
     memory_id: str | None,
     store: MemoryStore,
 ) -> MemoryRecord | None:
@@ -211,6 +241,7 @@ def _record_gmail_action(
         "gmail_draft_created": "Draft email",
         "gmail_reply_sent": "Reply email",
         "gmail_draft_sent": "Sent email",
+        "gmail_message_forwarded": "Forwarded email",
     }.get(event_type, "Email")
     title = _gmail_action_title(action_label, recipient, subject, draft_id)
     summary = _gmail_action_summary(
@@ -450,11 +481,26 @@ def _gmail_action_summary(
     return _truncate(" ".join(parts), 400)
 
 
-def _extract_messages(result: dict[str, Any]) -> list[dict[str, Any]]:
+def _extract_messages(result: dict[str, object]) -> list[dict[str, object]]:
     data = _dict_value(result.get("data")) or result
     messages = data.get("messages") if isinstance(data, dict) else None
     if isinstance(messages, list):
         return [message for message in messages if isinstance(message, dict)]
+    return []
+
+
+def _extract_single_or_messages(result: dict[str, object]) -> list[dict[str, object]]:
+    messages = _extract_messages(result)
+    if messages:
+        return messages
+    data = _dict_value(result.get("data")) or result
+    if isinstance(data, dict) and (
+        data.get("messageId")
+        or data.get("id")
+        or data.get("threadId")
+        or data.get("thread_id")
+    ):
+        return [data]
     return []
 
 
@@ -474,7 +520,7 @@ def _attachment_filenames(payload: object) -> list[str]:
     return list(dict.fromkeys(filenames))
 
 
-def _header(message: dict[str, Any], name: str) -> str:
+def _header(message: dict[str, object], name: str) -> str:
     payload = message.get("payload")
     headers = payload.get("headers") if isinstance(payload, dict) else []
     for header in headers or []:
@@ -496,7 +542,7 @@ def _first_str(*values: object) -> str:
     return ""
 
 
-def _dict_value(value: object) -> dict[str, Any]:
+def _dict_value(value: object) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
@@ -531,10 +577,10 @@ def _compact_links(values: Iterable[MemoryLink | None]) -> list[MemoryLink]:
     return links
 
 
-def _safe_compact(result: dict[str, Any]) -> dict[str, Any]:
+def _safe_compact(result: dict[str, object]) -> dict[str, object]:
     raw_data = result.get("data")
-    data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else result
-    compact: dict[str, Any] = {}
+    data: dict[str, object] = raw_data if isinstance(raw_data, dict) else result
+    compact: dict[str, object] = {}
     for key in (
         "id",
         "messageId",

@@ -84,12 +84,13 @@ def hybrid_candidates(
     query: str,
     *,
     top_k: int = 60,
+    workspace_id: str,
 ) -> list[SearchCandidate]:
     candidates: list[SearchCandidate] = []
     with closing(_connect(db_path)) as conn:
-        exact = exact_link_candidates(conn, query)
-        pinecone = pinecone_candidates(query, top_k=top_k)
-        recent = recent_unindexed_candidates(conn)
+        exact = exact_link_candidates(conn, query, workspace_id=workspace_id)
+        pinecone = pinecone_candidates(query, top_k=top_k, workspace_id=workspace_id)
+        recent = recent_unindexed_candidates(conn, workspace_id=workspace_id)
         candidates.extend(exact)
         candidates.extend(pinecone)
         candidates.extend(recent)
@@ -105,7 +106,7 @@ def hybrid_candidates(
 
 
 def exact_link_candidates(
-    conn: sqlite3.Connection, query: str
+    conn: sqlite3.Connection, query: str, *, workspace_id: str
 ) -> list[SearchCandidate]:
     identifiers = extract_identifiers(query)
     lowered_query = query.lower()
@@ -115,8 +116,11 @@ def exact_link_candidates(
         row = cast(
             sqlite3.Row | None,
             conn.execute(
-                "SELECT * FROM memories WHERE lower(memory_id) = ?",
-                (memory_id.lower(),),
+                """
+                SELECT * FROM memories
+                WHERE workspace_id = ? AND lower(memory_id) = ?
+                """,
+                (workspace_id, memory_id.lower()),
             ).fetchone(),
         )
         if row is not None:
@@ -135,7 +139,10 @@ def exact_link_candidates(
     link_filters = _exact_link_filters(identifiers)
     if link_filters:
         clauses = " OR ".join("(l.kind = ? AND l.value = ?)" for _ in link_filters)
-        params: SQLiteParams = tuple(value for pair in link_filters for value in pair)
+        params: SQLiteParams = (
+            workspace_id,
+            *(value for pair in link_filters for value in pair),
+        )
         link_rows = cast(
             list[sqlite3.Row],
             conn.execute(
@@ -143,7 +150,7 @@ def exact_link_candidates(
                 SELECT l.*, e.text AS event_text
                 FROM links l
                 LEFT JOIN events e ON e.event_id = l.event_id
-                WHERE {clauses}
+                WHERE l.workspace_id = ? AND ({clauses})
                 """,
                 params,
             ).fetchall(),
@@ -173,7 +180,9 @@ def exact_link_candidates(
     return candidates
 
 
-def pinecone_candidates(query: str, *, top_k: int = 60) -> list[SearchCandidate]:
+def pinecone_candidates(
+    query: str, *, top_k: int = 60, workspace_id: str
+) -> list[SearchCandidate]:
     settings = get_settings()
     if not pinecone_enabled():
         return []
@@ -184,7 +193,7 @@ def pinecone_candidates(query: str, *, top_k: int = 60) -> list[SearchCandidate]
         return []
 
     try:
-        from pinecone import Pinecone  # type: ignore[import-untyped]
+        from pinecone import Pinecone
 
         pinecone_factory = cast(type[_PineconeClient], Pinecone)
         pc = pinecone_factory(api_key=api_key)  # pyright: ignore[reportCallIssue]
@@ -211,7 +220,7 @@ def pinecone_candidates(query: str, *, top_k: int = 60) -> list[SearchCandidate]
             return []
         started = perf_counter()
         response = index.query(
-            namespace=settings.pinecone_namespace,
+            namespace=workspace_id,
             top_k=top_k,
             vector=vector,
             sparse_vector={
@@ -221,7 +230,7 @@ def pinecone_candidates(query: str, *, top_k: int = 60) -> list[SearchCandidate]
             include_values=False,
             include_metadata=True,
         )
-        logger.info(
+        logger.debug(
             "Pinecone hybrid memory search completed",
             extra={
                 "top_k": top_k,
@@ -259,7 +268,7 @@ def pinecone_candidates(query: str, *, top_k: int = 60) -> list[SearchCandidate]
 
 
 def recent_unindexed_candidates(
-    conn: sqlite3.Connection, *, limit: int = 24
+    conn: sqlite3.Connection, *, workspace_id: str, limit: int = 24
 ) -> list[SearchCandidate]:
     candidates: list[SearchCandidate] = []
     rows = cast(
@@ -268,11 +277,11 @@ def recent_unindexed_candidates(
             """
             SELECT entity_type, entity_id
             FROM memory_index_queue
-            WHERE status IN ('pending', 'failed')
+            WHERE workspace_id = ? AND status IN ('pending', 'failed')
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (limit,),
+            (workspace_id, limit),
         ).fetchall(),
     )
     seen = {
@@ -284,8 +293,8 @@ def recent_unindexed_candidates(
             row = cast(
                 sqlite3.Row | None,
                 conn.execute(
-                    "SELECT * FROM memories WHERE memory_id = ?",
-                    (entity_id,),
+                    "SELECT * FROM memories WHERE workspace_id = ? AND memory_id = ?",
+                    (workspace_id, entity_id),
                 ).fetchone(),
             )
             if row is not None:
@@ -303,8 +312,8 @@ def recent_unindexed_candidates(
             row = cast(
                 sqlite3.Row | None,
                 conn.execute(
-                    "SELECT * FROM events WHERE event_id = ?",
-                    (entity_id,),
+                    "SELECT * FROM events WHERE workspace_id = ? AND event_id = ?",
+                    (workspace_id, entity_id),
                 ).fetchone(),
             )
             if row is not None:
@@ -323,7 +332,12 @@ def recent_unindexed_candidates(
     recent_memory_rows = cast(
         list[sqlite3.Row],
         conn.execute(
-            "SELECT * FROM memories ORDER BY updated_at DESC LIMIT 8"
+            """
+            SELECT * FROM memories
+            WHERE workspace_id = ?
+            ORDER BY updated_at DESC LIMIT 8
+            """,
+            (workspace_id,),
         ).fetchall(),
     )
     for row in recent_memory_rows:
@@ -518,7 +532,7 @@ def _log_hybrid_diagnostics(
             if metadata:
                 lines.append(f"metadata={metadata!r}")
     lines.append("</merged_candidates>")
-    logger.info("\n".join(lines))
+    logger.debug("\n".join(lines))
 
 
 def _truncate(value: str, limit: int) -> str:

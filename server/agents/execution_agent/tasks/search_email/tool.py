@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from functools import partial
-from typing import Any, cast
+from typing import cast
 
 from server.config import get_settings
 from server.logging_config import logger
 from server.openrouter_client import OpenRouterChatCompletion, request_chat_completion
 from server.services.execution import get_execution_agent_logs
-from server.services.gmail.client import execute_gmail_tool, get_active_gmail_user_id
+from server.services.gmail.client import execute_google_tool, resolve_workspace_gmail_user_id
 from server.services.gmail.processing import (
     EmailTextCleaner,
     ProcessedEmail,
@@ -47,7 +47,7 @@ ERROR_ITERATION_LIMIT = "Email search orchestrator exceeded iteration limit"
 
 
 _COMPLETION_TOOL_SCHEMA = get_completion_schema()
-_LOG_STORE = get_execution_agent_logs()
+# Per-workspace log lookup deferred to call time (no module-level capture).
 _EMAIL_CLEANER = EmailTextCleaner(max_url_length=40)
 
 
@@ -61,7 +61,7 @@ def _create_error_response(
 
 
 # Create standardized success response for tool calls
-def _create_success_response(call_id: str, data: dict[str, Any]) -> tuple[str, str]:
+def _create_success_response(call_id: str, data: dict[str, object]) -> tuple[str, str]:
     """Create standardized success response for tool calls."""
     return (call_id, _safe_json_dumps(data))
 
@@ -75,7 +75,7 @@ def _validate_search_query(search_query: str) -> str | None:
 
 def _validate_gmail_connection() -> str | None:
     """Validate Gmail connection and return user ID or None."""
-    return get_active_gmail_user_id()
+    return resolve_workspace_gmail_user_id()
 
 
 def _validate_openrouter_config() -> tuple[str | None, str | None]:
@@ -88,7 +88,7 @@ def _validate_openrouter_config() -> tuple[str | None, str | None]:
 
 
 # Return task tool callables
-def build_registry(agent_name: str) -> dict[str, Callable[..., Any]]:
+def build_registry(agent_name: str) -> dict[str, Callable[..., object]]:
     """Return task tool callables."""
 
     return {
@@ -99,7 +99,7 @@ def build_registry(agent_name: str) -> dict[str, Callable[..., Any]]:
 # Run an agentic Gmail search for the provided query
 async def task_email_search(
     search_query: str, memory_id: str | None = None
-) -> list[dict[str, Any]] | dict[str, str | None]:
+) -> list[dict[str, object]] | dict[str, str | None]:
     """Run an agentic Gmail search for the provided query."""
     logger.info(f"[EMAIL_SEARCH] Starting search for: '{search_query}'")
 
@@ -130,9 +130,7 @@ async def task_email_search(
             api_key=api_key,
             memory_id=memory_id,
         )
-        logger.info(
-            f"[EMAIL_SEARCH] Found {len(result) if isinstance(result, list) else 0} emails"
-        )
+        logger.info(f"[EMAIL_SEARCH] Found {len(result)} emails")
         return result
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception(f"[EMAIL_SEARCH] Search failed: {exc}")
@@ -147,9 +145,9 @@ async def _run_email_search(
     model: str,
     api_key: str,
     memory_id: str | None,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     """Execute the main email search orchestration loop."""
-    messages: list[dict[str, Any]] = [
+    messages: list[dict[str, object]] = [
         {"role": "user", "content": _render_user_message(search_query)}
     ]
     queries: list[str] = []
@@ -173,10 +171,15 @@ async def _run_email_search(
 
         # Process assistant response
         assistant = _extract_assistant_message(response)
-        tool_calls = assistant.get("tool_calls") or []
+        tool_calls_raw = assistant.get("tool_calls")
+        tool_calls: list[dict[str, object]] = (
+            cast(list[dict[str, object]], tool_calls_raw)
+            if isinstance(tool_calls_raw, list)
+            else []
+        )
 
         # Add assistant message to conversation
-        assistant_entry: dict[str, Any] = {
+        assistant_entry: dict[str, object] = {
             "role": "assistant",
             "content": assistant.get("content", "") or "",
         }
@@ -237,25 +240,34 @@ def _render_user_message(search_query: str) -> str:
 # Execute tool calls from LLM and process search/completion responses
 async def _execute_tool_calls(
     *,
-    tool_calls: Sequence[dict[str, Any]],
+    tool_calls: Sequence[Mapping[str, object]],
     queries: list[str],
     emails: dict[str, GmailSearchEmail],
     composio_user_id: str,
     memory_id: str | None,
 ) -> tuple[list[tuple[str, str]], list[str] | None]:
+    _ = memory_id  # currently unused; retained for parity with caller signature.
     responses: list[tuple[str, str]] = []
     completion_ids: list[str] | None = None
 
     for call in tool_calls:
-        call_id = call.get("id") or SEARCH_TOOL_NAME
-        function = call.get("function") or {}
-        name = function.get("name") or ""
+        call_id_value = call.get("id") or SEARCH_TOOL_NAME
+        call_id = call_id_value if isinstance(call_id_value, str) else SEARCH_TOOL_NAME
+        function_raw = call.get("function")
+        function: Mapping[str, object] = (
+            cast(Mapping[str, object], function_raw)
+            if isinstance(function_raw, Mapping)
+            else {}
+        )
+        name_value = function.get("name") or ""
+        name = name_value if isinstance(name_value, str) else ""
         raw_arguments = function.get("arguments", {})
         arguments, parse_error = _parse_arguments(raw_arguments)
 
         if parse_error:
             # Handle argument parsing errors
-            query = arguments.get("query") if arguments else None
+            query_value = arguments.get("query") if arguments else None
+            query = query_value if isinstance(query_value, str) else None
             logger.warning(
                 f"[EMAIL_SEARCH] Tool argument parsing failed: {parse_error}"
             )
@@ -274,7 +286,10 @@ async def _execute_tool_calls(
 
         elif name == SEARCH_TOOL_NAME:
             # Handle Gmail search tool
-            search_query = arguments.get("query", "<unknown>")
+            search_query_value = arguments.get("query", "<unknown>")
+            search_query = (
+                search_query_value if isinstance(search_query_value, str) else "<unknown>"
+            )
             logger.info(f"[SEARCH_QUERY] LLM generated query: '{search_query}'")
 
             result_model = await _perform_search(
@@ -299,7 +314,8 @@ async def _execute_tool_calls(
 
         else:
             # Handle unsupported tools
-            query = arguments.get("query")
+            query_value = arguments.get("query")
+            query = query_value if isinstance(query_value, str) else None
             error = f"Unsupported tool: {name}"
             logger.warning(f"[EMAIL_SEARCH] Unsupported tool: {name}")
             responses.append(_create_error_response(call_id, query, error))
@@ -310,12 +326,13 @@ async def _execute_tool_calls(
 # Perform Gmail search using Composio and process results
 async def _perform_search(
     *,
-    arguments: dict[str, Any],
+    arguments: dict[str, object],
     queries: list[str],
     emails: dict[str, GmailSearchEmail],
     composio_user_id: str,
 ) -> EmailSearchToolResult:
-    query = (arguments.get("query") or "").strip()
+    query_value = arguments.get("query") or ""
+    query = (query_value if isinstance(query_value, str) else "").strip()
     if not query:
         logger.warning(f"[EMAIL_SEARCH] Search called with empty query")
         return EmailSearchToolResult(
@@ -324,7 +341,8 @@ async def _perform_search(
         )
 
     # Use LLM-provided max_results or default to 10
-    max_results = arguments.get("max_results", 10)
+    max_results_value = arguments.get("max_results", 10)
+    max_results = max_results_value if isinstance(max_results_value, int) else 10
 
     composio_arguments = {
         "query": query,
@@ -343,14 +361,14 @@ async def _perform_search(
         ],  # Ensure we get key headers
     }
 
-    _LOG_STORE.record_action(
+    get_execution_agent_logs().record_action(
         TASK_TOOL_NAME,
         description=f"{TASK_TOOL_NAME} search | query={query} | max_results={max_results}",
     )
 
     try:
-        raw_result = execute_gmail_tool(
-            "GMAIL_FETCH_EMAILS",
+        raw_result = execute_google_tool(
+            "GOOGLESUPER_FETCH_EMAILS",
             composio_user_id,
             arguments=composio_arguments,
         )
@@ -388,7 +406,7 @@ def _build_response(
     queries: Sequence[str],
     emails: dict[str, GmailSearchEmail],
     selected_ids: Sequence[str],
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     # Deduplicate queries while preserving order
     unique_queries = list(dict.fromkeys(queries))
 
@@ -412,7 +430,7 @@ def _build_response(
 
     payload = TaskEmailSearchPayload(emails=selected_emails)
 
-    _LOG_STORE.record_action(
+    get_execution_agent_logs().record_action(
         TASK_TOOL_NAME,
         description=(
             f"{TASK_TOOL_NAME} completed | queries={len(unique_queries)} "
@@ -423,30 +441,33 @@ def _build_response(
     return [email.model_dump(exclude_none=True) for email in payload.emails]
 
 
-def _extract_assistant_message(response: OpenRouterChatCompletion) -> dict[str, Any]:
+def _extract_assistant_message(response: OpenRouterChatCompletion) -> Mapping[str, object]:
     """Extract assistant message from OpenRouter API response."""
     if not response["choices"]:
         return {}
-    return cast(dict[str, Any], cast(object, response["choices"][0]["message"]))
+    return cast(Mapping[str, object], cast(object, response["choices"][0]["message"]))
 
 
-def _parse_arguments(raw_arguments: object) -> tuple[dict[str, Any], str | None]:
+def _parse_arguments(raw_arguments: object) -> tuple[dict[str, object], str | None]:
     """Parse tool arguments with proper error handling."""
     if isinstance(raw_arguments, dict):
-        return raw_arguments, None
+        return cast(dict[str, object], raw_arguments), None
     if isinstance(raw_arguments, str):
         if not raw_arguments.strip():
             return {}, None
         try:
-            return json.loads(raw_arguments), None
+            parsed = cast(object, json.loads(raw_arguments))
         except json.JSONDecodeError as exc:
             return {}, f"Failed to parse tool arguments: {exc}"
+        if isinstance(parsed, dict):
+            return cast(dict[str, object], parsed), None
+        return {}, ERROR_TOOL_ARGUMENTS_INVALID
     return {}, ERROR_TOOL_ARGUMENTS_INVALID
 
 
 def _handle_completion_tool(
-    arguments: dict[str, Any],
-) -> tuple[list[str] | None, dict[str, Any]]:
+    arguments: dict[str, object],
+) -> tuple[list[str] | None, dict[str, object]]:
     """Handle completion tool call, parsing message IDs and returning response."""
     raw_ids = arguments.get("message_ids")
     if raw_ids is None:
@@ -455,7 +476,8 @@ def _handle_completion_tool(
         return None, {"status": "error", "error": ERROR_MESSAGE_IDS_MUST_BE_LIST}
 
     # Filter out empty/invalid IDs efficiently
-    message_ids = [str(value).strip() for value in raw_ids if str(value).strip()]
+    raw_id_list = cast(list[object], raw_ids)
+    message_ids = [str(value).strip() for value in raw_id_list if str(value).strip()]
 
     return message_ids, {"status": "success", "message_ids": message_ids}
 

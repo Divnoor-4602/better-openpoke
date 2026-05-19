@@ -43,7 +43,9 @@ def list_agent_runs(
 def retrieve_agent_run(requestId: str) -> AgentRunResponse:
     run = get_execution_event_store().get_run(requestId)
     if run is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent run not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent run not found"
+        )
     return AgentRunResponse(run=agent_run_resource(run))
 
 
@@ -52,7 +54,7 @@ def retrieve_agent_run(requestId: str) -> AgentRunResponse:
     response_model=None,
     responses={
         200: {
-            "description": "AI SDK UI message stream for agent run events",
+            "description": "AI SDK UI message stream containing data-agent-event lifecycle chunks and compatibility data-execution-event chunks",
             "content": {"text/event-stream": {"schema": {"type": "string"}}},
         },
         **ERROR_RESPONSES,

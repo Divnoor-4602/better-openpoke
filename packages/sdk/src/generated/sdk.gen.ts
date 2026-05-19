@@ -4,8 +4,8 @@ import * as z from 'zod';
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { ConnectIntegrationData, ConnectIntegrationErrors, ConnectIntegrationResponses, CreateThreadAgentRunData, CreateThreadAgentRunErrors, CreateThreadAgentRunResponses, CreateThreadData, CreateThreadErrors, CreateThreadMessageData, CreateThreadMessageErrors, CreateThreadMessageResponses, CreateThreadResponses, DeleteThreadData, DeleteThreadErrors, DeleteThreadResponses, DisconnectIntegrationData, DisconnectIntegrationErrors, DisconnectIntegrationResponses, ListAgentRunsData, ListAgentRunsErrors, ListAgentRunsResponses, ListThreadAgentRunsData, ListThreadAgentRunsErrors, ListThreadAgentRunsResponses, ListThreadMessagesData, ListThreadMessagesErrors, ListThreadMessagesResponses, ListThreadsData, ListThreadsErrors, ListThreadsResponses, RetrieveAgentRunData, RetrieveAgentRunErrors, RetrieveAgentRunResponses, RetrieveHealthData, RetrieveHealthErrors, RetrieveHealthResponses, RetrieveIntegrationStatusData, RetrieveIntegrationStatusErrors, RetrieveIntegrationStatusResponses, RetrieveThreadData, RetrieveThreadErrors, RetrieveThreadResponses, StreamAgentRunEventsData, StreamAgentRunEventsErrors, StreamAgentRunEventsResponses, StreamThreadMessageData, StreamThreadMessageErrors, StreamThreadMessageResponses, UpdateThreadData, UpdateThreadErrors, UpdateThreadResponses } from './types.gen';
-import { zConnectIntegrationBody, zConnectIntegrationPath, zConnectIntegrationResponse, zCreateThreadAgentRunBody, zCreateThreadAgentRunPath, zCreateThreadAgentRunResponse, zCreateThreadMessageBody, zCreateThreadMessagePath, zCreateThreadMessageResponse, zCreateThreadResponse, zDeleteThreadPath, zDeleteThreadResponse, zDisconnectIntegrationBody, zDisconnectIntegrationPath, zDisconnectIntegrationResponse, zListAgentRunsQuery, zListAgentRunsResponse, zListThreadAgentRunsPath, zListThreadAgentRunsQuery, zListThreadAgentRunsResponse, zListThreadMessagesPath, zListThreadMessagesQuery, zListThreadMessagesResponse, zListThreadsQuery, zListThreadsResponse, zRetrieveAgentRunPath, zRetrieveAgentRunResponse, zRetrieveHealthResponse, zRetrieveIntegrationStatusBody, zRetrieveIntegrationStatusPath, zRetrieveIntegrationStatusResponse, zRetrieveThreadPath, zRetrieveThreadResponse, zStreamAgentRunEventsPath, zStreamAgentRunEventsQuery, zStreamThreadMessageBody, zStreamThreadMessagePath, zUpdateThreadBody, zUpdateThreadPath, zUpdateThreadResponse } from './zod.gen';
+import type { ConnectIntegrationData, ConnectIntegrationErrors, ConnectIntegrationResponses, CreateThreadAgentRunData, CreateThreadAgentRunErrors, CreateThreadAgentRunResponses, CreateThreadData, CreateThreadErrors, CreateThreadMessageData, CreateThreadMessageErrors, CreateThreadMessageResponses, CreateThreadResponses, DeleteThreadData, DeleteThreadErrors, DeleteThreadResponses, DevResetData, DevResetErrors, DevResetResponses, DiscardCalendarEventData, DiscardCalendarEventErrors, DiscardCalendarEventResponses, DiscardGmailDraftData, DiscardGmailDraftErrors, DiscardGmailDraftResponses, DisconnectIntegrationData, DisconnectIntegrationErrors, DisconnectIntegrationResponses, GenerateThreadTitleData, GenerateThreadTitleErrors, GenerateThreadTitleResponses, ListAgentRunsData, ListAgentRunsErrors, ListAgentRunsResponses, ListThreadAgentRunsData, ListThreadAgentRunsErrors, ListThreadAgentRunsResponses, ListThreadMessagesData, ListThreadMessagesErrors, ListThreadMessagesResponses, ListThreadsData, ListThreadsErrors, ListThreadsResponses, ListWorkspacesData, ListWorkspacesErrors, ListWorkspacesResponses, RetrieveAgentRunData, RetrieveAgentRunErrors, RetrieveAgentRunResponses, RetrieveHealthData, RetrieveHealthErrors, RetrieveHealthResponses, RetrieveIntegrationStatusData, RetrieveIntegrationStatusErrors, RetrieveIntegrationStatusResponses, RetrieveMeData, RetrieveMeErrors, RetrieveMeResponses, RetrieveThreadData, RetrieveThreadErrors, RetrieveThreadResponses, RetrieveTimezoneData, RetrieveTimezoneErrors, RetrieveTimezoneResponses, SendGmailDraftData, SendGmailDraftErrors, SendGmailDraftResponses, SetTimezoneData, SetTimezoneErrors, SetTimezoneResponses, StreamAgentRunEventsData, StreamAgentRunEventsErrors, StreamAgentRunEventsResponses, StreamReminderEventsData, StreamReminderEventsErrors, StreamReminderEventsResponses, StreamThreadMessageData, StreamThreadMessageErrors, StreamThreadMessageResponses, UpdateCalendarEventData, UpdateCalendarEventErrors, UpdateCalendarEventResponses, UpdateGmailDraftData, UpdateGmailDraftErrors, UpdateGmailDraftResponses, UpdateThreadData, UpdateThreadErrors, UpdateThreadResponses } from './types.gen';
+import { zConnectIntegrationBody, zConnectIntegrationPath, zConnectIntegrationResponse, zCreateThreadAgentRunBody, zCreateThreadAgentRunPath, zCreateThreadAgentRunResponse, zCreateThreadMessageBody, zCreateThreadMessagePath, zCreateThreadMessageResponse, zCreateThreadResponse, zDeleteThreadPath, zDeleteThreadResponse, zDevResetResponse, zDiscardCalendarEventPath, zDiscardCalendarEventResponse, zDiscardGmailDraftPath, zDiscardGmailDraftResponse, zDisconnectIntegrationBody, zDisconnectIntegrationPath, zDisconnectIntegrationResponse, zGenerateThreadTitlePath, zGenerateThreadTitleResponse, zListAgentRunsQuery, zListAgentRunsResponse, zListThreadAgentRunsPath, zListThreadAgentRunsQuery, zListThreadAgentRunsResponse, zListThreadMessagesPath, zListThreadMessagesQuery, zListThreadMessagesResponse, zListThreadsQuery, zListThreadsResponse, zListWorkspacesResponse, zRetrieveAgentRunPath, zRetrieveAgentRunResponse, zRetrieveHealthResponse, zRetrieveIntegrationStatusBody, zRetrieveIntegrationStatusPath, zRetrieveIntegrationStatusResponse, zRetrieveMeResponse, zRetrieveThreadPath, zRetrieveThreadResponse, zRetrieveTimezoneResponse, zSendGmailDraftPath, zSendGmailDraftResponse, zSetTimezoneBody, zSetTimezoneResponse, zStreamAgentRunEventsPath, zStreamAgentRunEventsQuery, zStreamThreadMessageBody, zStreamThreadMessagePath, zUpdateCalendarEventBody, zUpdateCalendarEventPath, zUpdateCalendarEventResponse, zUpdateGmailDraftBody, zUpdateGmailDraftPath, zUpdateGmailDraftResponse, zUpdateThreadBody, zUpdateThreadPath, zUpdateThreadResponse } from './zod.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -22,6 +22,21 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 };
 
 /**
+ * List all workspaces registered on this server (demo visibility)
+ */
+export const listWorkspaces = <ThrowOnError extends boolean = false>(options?: Options<ListWorkspacesData, ThrowOnError>) => (options?.client ?? client).get<ListWorkspacesResponses, ListWorkspacesErrors, ThrowOnError>({
+    requestValidator: async (data) => await z.object({
+        body: z.never().optional(),
+        path: z.never().optional(),
+        query: z.never().optional()
+    }).parseAsync(data),
+    responseValidator: async (data) => await zListWorkspacesResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
+    url: '/api/admin/workspaces',
+    ...options
+});
+
+/**
  * List agent runs
  */
 export const listAgentRuns = <ThrowOnError extends boolean = false>(options?: Options<ListAgentRunsData, ThrowOnError>) => (options?.client ?? client).get<ListAgentRunsResponses, ListAgentRunsErrors, ThrowOnError>({
@@ -31,6 +46,7 @@ export const listAgentRuns = <ThrowOnError extends boolean = false>(options?: Op
         query: zListAgentRunsQuery.optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zListAgentRunsResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/agent-runs',
     ...options
 });
@@ -45,6 +61,7 @@ export const retrieveAgentRun = <ThrowOnError extends boolean = false>(options: 
         query: z.never().optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zRetrieveAgentRunResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/agent-runs/{requestId}',
     ...options
 });
@@ -58,7 +75,106 @@ export const streamAgentRunEvents = <ThrowOnError extends boolean = false>(optio
         path: zStreamAgentRunEventsPath,
         query: zStreamAgentRunEventsQuery.optional()
     }).parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/agent-runs/{requestId}/stream',
+    ...options
+});
+
+/**
+ * Discard a Google Calendar event
+ */
+export const discardCalendarEvent = <ThrowOnError extends boolean = false>(options: Options<DiscardCalendarEventData, ThrowOnError>) => (options.client ?? client).delete<DiscardCalendarEventResponses, DiscardCalendarEventErrors, ThrowOnError>({
+    requestValidator: async (data) => await z.object({
+        body: z.never().optional(),
+        path: zDiscardCalendarEventPath,
+        query: z.never().optional()
+    }).parseAsync(data),
+    responseValidator: async (data) => await zDiscardCalendarEventResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
+    url: '/api/calendar/events/{event_id}',
+    ...options
+});
+
+/**
+ * Update a Google Calendar event
+ */
+export const updateCalendarEvent = <ThrowOnError extends boolean = false>(options: Options<UpdateCalendarEventData, ThrowOnError>) => (options.client ?? client).patch<UpdateCalendarEventResponses, UpdateCalendarEventErrors, ThrowOnError>({
+    requestValidator: async (data) => await z.object({
+        body: zUpdateCalendarEventBody,
+        path: zUpdateCalendarEventPath,
+        query: z.never().optional()
+    }).parseAsync(data),
+    responseValidator: async (data) => await zUpdateCalendarEventResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
+    url: '/api/calendar/events/{event_id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Truncate dev tables and clear conversation logs for the caller's workspace
+ */
+export const devReset = <ThrowOnError extends boolean = false>(options?: Options<DevResetData, ThrowOnError>) => (options?.client ?? client).post<DevResetResponses, DevResetErrors, ThrowOnError>({
+    requestValidator: async (data) => await z.object({
+        body: z.never().optional(),
+        path: z.never().optional(),
+        query: z.never().optional()
+    }).parseAsync(data),
+    responseValidator: async (data) => await zDevResetResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
+    url: '/api/dev/reset',
+    ...options
+});
+
+/**
+ * Discard a Gmail draft
+ */
+export const discardGmailDraft = <ThrowOnError extends boolean = false>(options: Options<DiscardGmailDraftData, ThrowOnError>) => (options.client ?? client).delete<DiscardGmailDraftResponses, DiscardGmailDraftErrors, ThrowOnError>({
+    requestValidator: async (data) => await z.object({
+        body: z.never().optional(),
+        path: zDiscardGmailDraftPath,
+        query: z.never().optional()
+    }).parseAsync(data),
+    responseValidator: async (data) => await zDiscardGmailDraftResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
+    url: '/api/gmail/drafts/{draft_id}',
+    ...options
+});
+
+/**
+ * Update a Gmail draft
+ */
+export const updateGmailDraft = <ThrowOnError extends boolean = false>(options: Options<UpdateGmailDraftData, ThrowOnError>) => (options.client ?? client).patch<UpdateGmailDraftResponses, UpdateGmailDraftErrors, ThrowOnError>({
+    requestValidator: async (data) => await z.object({
+        body: zUpdateGmailDraftBody,
+        path: zUpdateGmailDraftPath,
+        query: z.never().optional()
+    }).parseAsync(data),
+    responseValidator: async (data) => await zUpdateGmailDraftResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
+    url: '/api/gmail/drafts/{draft_id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Send a Gmail draft
+ */
+export const sendGmailDraft = <ThrowOnError extends boolean = false>(options: Options<SendGmailDraftData, ThrowOnError>) => (options.client ?? client).post<SendGmailDraftResponses, SendGmailDraftErrors, ThrowOnError>({
+    requestValidator: async (data) => await z.object({
+        body: z.never().optional(),
+        path: zSendGmailDraftPath,
+        query: z.never().optional()
+    }).parseAsync(data),
+    responseValidator: async (data) => await zSendGmailDraftResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
+    url: '/api/gmail/drafts/{draft_id}/send',
     ...options
 });
 
@@ -86,6 +202,7 @@ export const connectIntegration = <ThrowOnError extends boolean = false>(options
         query: z.never().optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zConnectIntegrationResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/integrations/{provider}/connect',
     ...options,
     headers: {
@@ -104,6 +221,7 @@ export const disconnectIntegration = <ThrowOnError extends boolean = false>(opti
         query: z.never().optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zDisconnectIntegrationResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/integrations/{provider}/disconnect',
     ...options,
     headers: {
@@ -122,12 +240,76 @@ export const retrieveIntegrationStatus = <ThrowOnError extends boolean = false>(
         query: z.never().optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zRetrieveIntegrationStatusResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/integrations/{provider}/status',
     ...options,
     headers: {
         'Content-Type': 'application/json',
         ...options.headers
     }
+});
+
+/**
+ * Return the authenticated caller's workspace
+ */
+export const retrieveMe = <ThrowOnError extends boolean = false>(options?: Options<RetrieveMeData, ThrowOnError>) => (options?.client ?? client).get<RetrieveMeResponses, RetrieveMeErrors, ThrowOnError>({
+    requestValidator: async (data) => await z.object({
+        body: z.never().optional(),
+        path: z.never().optional(),
+        query: z.never().optional()
+    }).parseAsync(data),
+    responseValidator: async (data) => await zRetrieveMeResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
+    url: '/api/me',
+    ...options
+});
+
+/**
+ * Get user timezone
+ */
+export const retrieveTimezone = <ThrowOnError extends boolean = false>(options?: Options<RetrieveTimezoneData, ThrowOnError>) => (options?.client ?? client).get<RetrieveTimezoneResponses, RetrieveTimezoneErrors, ThrowOnError>({
+    requestValidator: async (data) => await z.object({
+        body: z.never().optional(),
+        path: z.never().optional(),
+        query: z.never().optional()
+    }).parseAsync(data),
+    responseValidator: async (data) => await zRetrieveTimezoneResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
+    url: '/api/meta/timezone',
+    ...options
+});
+
+/**
+ * Set user timezone
+ */
+export const setTimezone = <ThrowOnError extends boolean = false>(options: Options<SetTimezoneData, ThrowOnError>) => (options.client ?? client).post<SetTimezoneResponses, SetTimezoneErrors, ThrowOnError>({
+    requestValidator: async (data) => await z.object({
+        body: zSetTimezoneBody,
+        path: z.never().optional(),
+        query: z.never().optional()
+    }).parseAsync(data),
+    responseValidator: async (data) => await zSetTimezoneResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
+    url: '/api/meta/timezone',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Stream reminder fire events
+ */
+export const streamReminderEvents = <ThrowOnError extends boolean = false>(options?: Options<StreamReminderEventsData, ThrowOnError>) => (options?.client ?? client).get<StreamReminderEventsResponses, StreamReminderEventsErrors, ThrowOnError>({
+    requestValidator: async (data) => await z.object({
+        body: z.never().optional(),
+        path: z.never().optional(),
+        query: z.never().optional()
+    }).parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
+    url: '/api/reminders/events',
+    ...options
 });
 
 /**
@@ -140,6 +322,7 @@ export const listThreads = <ThrowOnError extends boolean = false>(options?: Opti
         query: zListThreadsQuery.optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zListThreadsResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/threads',
     ...options
 });
@@ -154,6 +337,7 @@ export const createThread = <ThrowOnError extends boolean = false>(options?: Opt
         query: z.never().optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zCreateThreadResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/threads',
     ...options
 });
@@ -168,6 +352,7 @@ export const deleteThread = <ThrowOnError extends boolean = false>(options: Opti
         query: z.never().optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zDeleteThreadResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/threads/{threadId}',
     ...options
 });
@@ -182,6 +367,7 @@ export const retrieveThread = <ThrowOnError extends boolean = false>(options: Op
         query: z.never().optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zRetrieveThreadResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/threads/{threadId}',
     ...options
 });
@@ -196,6 +382,7 @@ export const updateThread = <ThrowOnError extends boolean = false>(options: Opti
         query: z.never().optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zUpdateThreadResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/threads/{threadId}',
     ...options,
     headers: {
@@ -214,6 +401,7 @@ export const listThreadAgentRuns = <ThrowOnError extends boolean = false>(option
         query: zListThreadAgentRunsQuery.optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zListThreadAgentRunsResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/threads/{threadId}/agent-runs',
     ...options
 });
@@ -228,6 +416,7 @@ export const createThreadAgentRun = <ThrowOnError extends boolean = false>(optio
         query: z.never().optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zCreateThreadAgentRunResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/threads/{threadId}/agent-runs',
     ...options,
     headers: {
@@ -246,6 +435,7 @@ export const listThreadMessages = <ThrowOnError extends boolean = false>(options
         query: zListThreadMessagesQuery.optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zListThreadMessagesResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/threads/{threadId}/messages',
     ...options
 });
@@ -260,6 +450,7 @@ export const createThreadMessage = <ThrowOnError extends boolean = false>(option
         query: z.never().optional()
     }).parseAsync(data),
     responseValidator: async (data) => await zCreateThreadMessageResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/threads/{threadId}/messages',
     ...options,
     headers: {
@@ -277,10 +468,26 @@ export const streamThreadMessage = <ThrowOnError extends boolean = false>(option
         path: zStreamThreadMessagePath,
         query: z.never().optional()
     }).parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
     url: '/api/threads/{threadId}/messages/stream',
     ...options,
     headers: {
         'Content-Type': 'application/json',
         ...options.headers
     }
+});
+
+/**
+ * Generate a thread title
+ */
+export const generateThreadTitle = <ThrowOnError extends boolean = false>(options: Options<GenerateThreadTitleData, ThrowOnError>) => (options.client ?? client).post<GenerateThreadTitleResponses, GenerateThreadTitleErrors, ThrowOnError>({
+    requestValidator: async (data) => await z.object({
+        body: z.never().optional(),
+        path: zGenerateThreadTitlePath,
+        query: z.never().optional()
+    }).parseAsync(data),
+    responseValidator: async (data) => await zGenerateThreadTitleResponse.parseAsync(data),
+    security: [{ scheme: 'basic', type: 'http' }],
+    url: '/api/threads/{threadId}/title',
+    ...options
 });

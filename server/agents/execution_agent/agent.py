@@ -5,7 +5,6 @@ from pathlib import Path
 from ...services.execution import get_execution_agent_logs
 from ...services.execution.log_store import ExecutionAgentLogStore
 
-
 # Load system prompt template from file
 _prompt_path = Path(__file__).parent / "system_prompt.md"
 _FALLBACK_SYSTEM_PROMPT_TEMPLATE = """You are an execution agent responsible for completing specific tasks using available tools.
@@ -38,7 +37,7 @@ class ExecutionAgent:
         name: str,
         display_name: str | None = None,
         memory_context: str = "",
-        conversation_limit: int | None = None
+        conversation_limit: int | None = None,
     ):
         """
         Initialize an execution agent.
@@ -59,8 +58,7 @@ class ExecutionAgent:
         agent_purpose = f"Handle tasks related to: {self.display_name}"
 
         prompt = SYSTEM_PROMPT_TEMPLATE.format(
-            agent_name=self.display_name,
-            agent_purpose=agent_purpose
+            agent_name=self.display_name, agent_purpose=agent_purpose
         )
         if self.memory_context.strip():
             return f"{prompt}\n\n# Memory Context\n\n{self.memory_context}"
@@ -83,20 +81,20 @@ class ExecutionAgent:
             # Apply conversation limit if needed
             if self.conversation_limit and self.conversation_limit > 0:
                 # Parse entries and limit them
-                lines = transcript.split('\n')
-                request_count = sum(1 for line in lines if '<agent_request' in line)
+                lines = transcript.split("\n")
+                request_count = sum(1 for line in lines if "<agent_request" in line)
 
                 if request_count > self.conversation_limit:
                     # Find where to cut
                     kept_requests = 0
                     cutoff_index = len(lines)
                     for i in range(len(lines) - 1, -1, -1):
-                        if '<agent_request' in lines[i]:
+                        if "<agent_request" in lines[i]:
                             kept_requests += 1
                             if kept_requests == self.conversation_limit:
                                 cutoff_index = i
                                 break
-                    transcript = '\n'.join(lines[cutoff_index:])
+                    transcript = "\n".join(lines[cutoff_index:])
 
             return f"{base_prompt}\n\n# Execution History\n\n{transcript}"
 
@@ -113,9 +111,7 @@ class ExecutionAgent:
         Returns:
             List of messages in OpenRouter format
         """
-        return [
-            {"role": "user", "content": current_instruction}
-        ]
+        return [{"role": "user", "content": current_instruction}]
 
     # Log the agent's final response to the execution log store
     def record_response(self, response: str) -> None:
@@ -123,8 +119,12 @@ class ExecutionAgent:
         self._log_store.record_agent_response(self.name, response)
 
     # Log tool invocation and results with truncated content for readability
-    def record_tool_execution(self, tool_name: str, arguments: str, result: str) -> None:
+    def record_tool_execution(
+        self, tool_name: str, arguments: str, result: str
+    ) -> None:
         """Record tool execution details."""
-        self._log_store.record_action(self.name, f"Calling {tool_name} with: {arguments[:200]}")
+        self._log_store.record_action(
+            self.name, f"Calling {tool_name} with: {arguments[:200]}"
+        )
         # Record the tool response
         self._log_store.record_tool_response(self.name, tool_name, result[:500])
