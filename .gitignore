@@ -46,3 +46,6 @@ server/venv/
 server/generated/openapi.json
 server/repomix-output.txt
 server/plans/
+
+# direnv (local conda activation; see .envrc.example)
+.envrc

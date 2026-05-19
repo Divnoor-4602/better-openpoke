@@ -1,0 +1,10 @@
+# Template for direnv: auto-activates your Python env when you `cd` into the repo.
+# Install direnv (`brew install direnv`), copy this file to `.envrc`,
+# then run `direnv allow`.
+
+# --- conda users (recommended: prepend the env's bin to PATH; works inside
+#     direnv without needing conda's shell hook) ---
+# PATH_add /Users/<you>/anaconda3/envs/better-openpoke/bin
+
+# --- venv users ---
+# source .venv/bin/activate

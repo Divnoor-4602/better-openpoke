@@ -3,6 +3,6 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "cd .. && /Users/divnoor/anaconda3/envs/better-openpoke/bin/python -m server.server --reload"
+    "dev": "cd .. && python -m server.server --reload"
   }
 }
