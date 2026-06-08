@@ -3,7 +3,7 @@ import type { KeyboardEvent } from 'react'
 import { PlusIcon, UserIcon, XIcon } from '@phosphor-icons/react'
 import { useState } from 'react'
 
-import { Button } from '@/components/ui/button'
+import { Button } from '@general-poke/ui/components/button'
 
 const PARTICIPANT_CONTROL_CLASS =
   'flex h-5 items-center gap-1 rounded-poke border px-2 text-xs font-light'

@@ -1,7 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 
 import { GeneralMagicLogo } from '@/assets/general-magic-logo'
-import { ShimmeringText } from '@/components/ui/shimmering-text'
+import { ShimmeringText } from '@general-poke/ui/components/shimmering-text'
 
 import type { AssistantState } from '../../lib/agent-state'
 

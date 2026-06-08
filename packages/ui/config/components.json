@@ -1,0 +1,20 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/styles/styles.css",
+    "baseColor": "neutral",
+    "cssVariables": true
+  },
+  "aliases": {
+    "components": "@general-poke/ui/components",
+    "utils": "@general-poke/ui/lib/utils",
+    "ui": "@general-poke/ui/components",
+    "lib": "@general-poke/ui/lib",
+    "hooks": "@general-poke/ui/hooks"
+  },
+  "iconLibrary": "lucide"
+}

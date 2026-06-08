@@ -1,8 +1,8 @@
 import { NotePencilIcon } from '@phosphor-icons/react'
 import { useNavigate } from '@tanstack/react-router'
 
-import { Button } from '@/components/ui/button'
-import { TooltipTrigger } from '@/components/ui/tooltip'
+import { Button } from '@general-poke/ui/components/button'
+import { TooltipTrigger } from '@general-poke/ui/components/tooltip'
 
 type NewThreadButtonProps = {
   handle?: TooltipHandle

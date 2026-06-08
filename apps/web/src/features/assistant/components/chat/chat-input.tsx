@@ -23,7 +23,6 @@ export const ChatInput = ({
 }: ChatInputProps) => {
   const value = useChatDraftStore((s) => s.text)
   const setValue = useChatDraftStore((s) => s.setText)
-
   const handleSubmit = () => {
     const text = value.trim()
     if (!text) return

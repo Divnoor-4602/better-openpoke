@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react'
 import { SignOutIcon, UserIcon } from '@phosphor-icons/react'
 
 import GoogleIcon from '@/assets/google-icon'
-import { Button } from '@/components/ui/button'
+import { Button } from '@general-poke/ui/components/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,8 +11,8 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { TooltipTrigger } from '@/components/ui/tooltip'
+} from '@general-poke/ui/components/dropdown-menu'
+import { TooltipTrigger } from '@general-poke/ui/components/tooltip'
 import { cn } from '@/lib/utils'
 
 import {

@@ -1,6 +1,6 @@
 import * as React from 'react'
 
-import { Input } from '@/components/ui/input'
+import { Input } from '@general-poke/ui/components/input'
 import { cn } from '@/lib/utils'
 
 type AuthInputProps = React.ComponentProps<'input'> & {

@@ -1,7 +1,7 @@
 import { ChatIcon } from '@phosphor-icons/react'
 import { Link } from '@tanstack/react-router'
 
-import { Button } from '@/components/ui/button'
+import { Button } from '@general-poke/ui/components/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,8 +9,8 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { TooltipTrigger } from '@/components/ui/tooltip'
+} from '@general-poke/ui/components/dropdown-menu'
+import { TooltipTrigger } from '@general-poke/ui/components/tooltip'
 import { cn } from '@/lib/utils'
 
 import type { ThreadGroup } from '../lib/group-threads-by-recency'

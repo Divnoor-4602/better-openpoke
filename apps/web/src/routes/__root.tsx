@@ -8,7 +8,7 @@ import {
 } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 
-import { Toaster } from '@/components/ui/sonner'
+import { Toaster } from '@general-poke/ui/components/sonner'
 
 import TanStackQueryDevtools from '../lib/tanstack-query/devtools'
 import appCss from '../styles.css?url'

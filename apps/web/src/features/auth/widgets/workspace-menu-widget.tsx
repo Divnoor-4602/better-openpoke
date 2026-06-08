@@ -1,6 +1,6 @@
 import { SignOutIcon, UserIcon } from '@phosphor-icons/react'
 
-import { Button } from '@/components/ui/button'
+import { Button } from '@general-poke/ui/components/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,7 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+} from '@general-poke/ui/components/dropdown-menu'
 import { useAuth } from '@/features/auth/hooks/use-auth'
 
 export const WorkspaceMenuWidget = () => {

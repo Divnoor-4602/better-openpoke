@@ -1,4 +1,4 @@
-import { CopyButton } from '@/components/ui/copy-button'
+import { CopyButton } from '@general-poke/ui/components/copy-button'
 
 type DraftEmailCopyButtonProps = {
   body: string

@@ -2,7 +2,7 @@ import type React from 'react'
 
 import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip'
 
-import { cn } from '@/lib/utils'
+import { cn } from '@general-poke/ui/lib/utils'
 
 export const TooltipCreateHandle: typeof TooltipPrimitive.createHandle =
   TooltipPrimitive.createHandle

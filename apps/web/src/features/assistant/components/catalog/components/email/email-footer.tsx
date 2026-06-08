@@ -2,7 +2,7 @@ import { ArrowSquareOutIcon } from '@phosphor-icons/react'
 
 import type { DraftCacheValue } from '@/lib/poke/gmail'
 
-import { Button } from '@/components/ui/button'
+import { Button } from '@general-poke/ui/components/button'
 
 import type { DraftEmailSendButtonProps } from './email-send-button'
 

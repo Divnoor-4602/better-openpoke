@@ -9,13 +9,13 @@ import {
   TopbarMenuGroup,
   TopbarRight,
 } from '@/components/shared/topbar'
-import { Button } from '@/components/ui/button'
+import { Button } from '@general-poke/ui/components/button'
 import {
   Tooltip,
   TooltipContent,
   TooltipCreateHandle,
   TooltipTrigger,
-} from '@/components/ui/tooltip'
+} from '@general-poke/ui/components/tooltip'
 import { NewThreadButton } from '@/features/thread/components/new-thread-button'
 import { ThreadMenuWidget } from '@/features/thread/widgets/thread-menu-widget'
 import { ThreadTitleWidget } from '@/features/thread/widgets/thread-title-widget'

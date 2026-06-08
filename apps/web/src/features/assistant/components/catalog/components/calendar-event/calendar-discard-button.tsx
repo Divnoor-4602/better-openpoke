@@ -1,6 +1,6 @@
 import { TrashIcon } from '@phosphor-icons/react'
 
-import { Button } from '@/components/ui/button'
+import { Button } from '@general-poke/ui/components/button'
 
 export type CalendarEventDiscardButtonProps = {
   disabled?: boolean

@@ -3,7 +3,7 @@ import type { UseInViewOptions } from 'motion/react'
 import { motion, useInView } from 'motion/react'
 import React, { useRef } from 'react'
 
-import { cn } from '@/lib/utils'
+import { cn } from '@general-poke/ui/lib/utils'
 
 interface ShimmeringTextProps {
   className?: string

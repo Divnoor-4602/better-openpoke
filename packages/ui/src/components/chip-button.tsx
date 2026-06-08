@@ -2,8 +2,8 @@ import type { HTMLMotionProps } from 'motion/react'
 
 import { motion } from 'motion/react'
 
-import { buttonVariants } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { buttonVariants } from '@general-poke/ui/components/button'
+import { cn } from '@general-poke/ui/lib/utils'
 
 export type ChipButtonProps = HTMLMotionProps<'button'>
 

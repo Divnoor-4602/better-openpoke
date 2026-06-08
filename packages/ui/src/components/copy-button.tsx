@@ -2,9 +2,9 @@ import { CheckIcon, CopyIcon } from '@phosphor-icons/react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
 
-import { buttonVariants } from '@/components/ui/button'
-import { useTimeout } from '@/hooks/use-timeout'
-import { cn } from '@/lib/utils'
+import { buttonVariants } from '@general-poke/ui/components/button'
+import { useTimeout } from '@general-poke/ui/hooks/use-timeout'
+import { cn } from '@general-poke/ui/lib/utils'
 
 const COPIED_TIMEOUT_MS = 1500
 

@@ -6,7 +6,7 @@ import {
 } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
 
-import { ShimmeringText } from '@/components/ui/shimmering-text'
+import { ShimmeringText } from '@general-poke/ui/components/shimmering-text'
 import { cn } from '@/lib/utils'
 
 import type { NormalizedToolCall } from '../../lib/agent-state'

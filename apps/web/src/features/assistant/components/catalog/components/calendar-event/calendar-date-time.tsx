@@ -2,7 +2,7 @@ import type { HTMLMotionProps } from 'motion/react'
 
 import { ArrowBendUpRightIcon, MoonIcon, SunIcon } from '@phosphor-icons/react'
 
-import { ChipButton } from '@/components/ui/chip-button'
+import { ChipButton } from '@general-poke/ui/components/chip-button'
 
 import {
   formatEventDay,
