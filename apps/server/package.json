@@ -1,0 +1,8 @@
+{
+  "name": "general-poke",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "cd .. && python -m server.server --reload"
+  }
+}

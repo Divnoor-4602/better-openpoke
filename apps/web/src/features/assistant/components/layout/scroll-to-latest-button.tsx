@@ -1,9 +1,8 @@
+import { cn } from '@general-poke/ui'
+import { buttonVariants } from '@general-poke/ui/components/button'
 import { ArrowDownIcon } from '@phosphor-icons/react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
-
-import { buttonVariants } from '@general-poke/ui/components/button'
-import { cn } from '@/lib/utils'
 
 const buttonMotionProps = {
   animate: { opacity: 1, scale: 1, y: 0 },

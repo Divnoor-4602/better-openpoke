@@ -1,8 +1,7 @@
+import { cn } from '@general-poke/ui'
+import { ShimmeringText } from '@general-poke/ui/components/shimmering-text'
 import { CaretRightIcon } from '@phosphor-icons/react'
 import { AnimatePresence, motion } from 'motion/react'
-
-import { ShimmeringText } from '@general-poke/ui/components/shimmering-text'
-import { cn } from '@/lib/utils'
 
 import type { ToolsSummary } from '../../lib/tools-summary'
 

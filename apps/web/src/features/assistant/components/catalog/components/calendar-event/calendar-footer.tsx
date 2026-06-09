@@ -1,10 +1,10 @@
 import type { HTMLMotionProps } from 'motion/react'
 
+import { ChipButton } from '@general-poke/ui/components/chip-button'
+import { CopyButton } from '@general-poke/ui/components/copy-button'
 import { TrashIcon } from '@phosphor-icons/react'
 
 import GoogleMeetIcon from '@/assets/google-meet-icon'
-import { ChipButton } from '@general-poke/ui/components/chip-button'
-import { CopyButton } from '@general-poke/ui/components/copy-button'
 
 import { formatEventForClipboard } from './format-event-time'
 

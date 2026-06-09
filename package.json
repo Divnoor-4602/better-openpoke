@@ -3,17 +3,18 @@
   "private": true,
   "packageManager": "bun@1.3.4",
   "workspaces": [
-    "server",
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "services/*"
   ],
   "scripts": {
     "dev": "turbo dev --ui=tui",
     "build": "turbo build",
     "lint": "turbo lint",
     "dev:web": "turbo dev --filter=web --ui=tui",
-    "dev:server": "turbo dev --filter=openpoke-server --ui=tui",
-    "dev:app": "turbo dev --filter=openpoke-server --filter=web --ui=tui"
+    "dev:server": "turbo dev --filter=general-poke --ui=tui",
+    "dev:app": "turbo dev --filter=general-poke --filter=web --ui=tui",
+    "dev:zelda": "turbo dev --filter=@general-poke/zelda --ui=tui"
   },
   "devDependencies": {
     "turbo": "^2.9.12"

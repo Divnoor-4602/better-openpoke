@@ -1,6 +1,6 @@
-import { useParams } from '@tanstack/react-router'
-
 import type { TooltipTrigger } from '@general-poke/ui/components/tooltip'
+
+import { useParams } from '@tanstack/react-router'
 
 import { useThreads } from '@/lib/poke/thread'
 

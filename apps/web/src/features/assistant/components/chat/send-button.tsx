@@ -1,8 +1,7 @@
+import { cn } from '@general-poke/ui'
+import { buttonVariants } from '@general-poke/ui/components/button'
 import { ArrowUpIcon, StopIcon } from '@phosphor-icons/react'
 import { AnimatePresence, motion } from 'motion/react'
-
-import { buttonVariants } from '@general-poke/ui/components/button'
-import { cn } from '@/lib/utils'
 
 type SendButtonProps = {
   disabled?: boolean

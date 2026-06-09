@@ -1,8 +1,7 @@
 import type { AnchorHTMLAttributes } from 'react'
 
+import { cn } from '@general-poke/ui'
 import { ArrowUpRightIcon } from '@phosphor-icons/react'
-
-import { cn } from '@/lib/utils'
 
 type StreamdownLinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & {
   node?: unknown

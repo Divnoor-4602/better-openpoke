@@ -1,6 +1,5 @@
-import { PaperclipIcon } from '@phosphor-icons/react'
-
 import { Button } from '@general-poke/ui/components/button'
+import { PaperclipIcon } from '@phosphor-icons/react'
 
 export const AttachmentsButton = () => {
   return (

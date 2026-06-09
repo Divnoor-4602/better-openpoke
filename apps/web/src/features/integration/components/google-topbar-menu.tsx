@@ -1,8 +1,6 @@
 import type { ComponentProps } from 'react'
 
-import { SignOutIcon, UserIcon } from '@phosphor-icons/react'
-
-import GoogleIcon from '@/assets/google-icon'
+import { cn } from '@general-poke/ui'
 import { Button } from '@general-poke/ui/components/button'
 import {
   DropdownMenu,
@@ -13,7 +11,9 @@ import {
   DropdownMenuTrigger,
 } from '@general-poke/ui/components/dropdown-menu'
 import { TooltipTrigger } from '@general-poke/ui/components/tooltip'
-import { cn } from '@/lib/utils'
+import { SignOutIcon, UserIcon } from '@phosphor-icons/react'
+
+import GoogleIcon from '@/assets/google-icon'
 
 import {
   getGoogleIntegrationLabel,

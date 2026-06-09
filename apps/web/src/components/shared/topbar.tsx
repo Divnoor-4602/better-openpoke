@@ -1,5 +1,4 @@
-import { cn } from '@/lib/utils'
-
+import { cn } from '@general-poke/ui'
 import { Separator } from '@general-poke/ui/components/separator'
 
 type TopbarProps = React.ComponentProps<'div'>

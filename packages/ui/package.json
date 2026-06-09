@@ -4,7 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./styles.css": "./src/styles/styles.css",
+    "./styles.css": "./styles.css",
     "./lib/utils": "./src/lib/utils.ts",
     "./hooks/use-mobile": "./src/hooks/use-mobile.ts",
     "./hooks/use-timeout": "./src/hooks/use-timeout.ts",

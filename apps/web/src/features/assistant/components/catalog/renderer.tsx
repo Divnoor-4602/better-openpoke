@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils'
+import { cn } from '@general-poke/ui'
 
 import type { MessageBlock } from '../../lib/agent-state'
 

@@ -1,6 +1,5 @@
-import { TrashIcon } from '@phosphor-icons/react'
-
 import { Button } from '@general-poke/ui/components/button'
+import { TrashIcon } from '@phosphor-icons/react'
 
 export type DraftEmailDiscardButtonProps = {
   disabled?: boolean

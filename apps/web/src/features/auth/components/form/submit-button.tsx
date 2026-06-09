@@ -1,9 +1,8 @@
 import { Button as ButtonPrimitive } from '@base-ui/react/button'
+import { cn } from '@general-poke/ui'
+import { buttonVariants } from '@general-poke/ui/components/button'
 import { CaretRightIcon, CircleNotchIcon } from '@phosphor-icons/react'
 import { AnimatePresence, motion } from 'motion/react'
-
-import { buttonVariants } from '@general-poke/ui/components/button'
-import { cn } from '@/lib/utils'
 
 type SubmitButtonProps = {
   children: React.ReactNode

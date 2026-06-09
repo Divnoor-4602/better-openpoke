@@ -1,3 +1,5 @@
+import { cn } from '@general-poke/ui'
+import { ShimmeringText } from '@general-poke/ui/components/shimmering-text'
 import {
   CheckCircleIcon,
   ProhibitIcon,
@@ -5,9 +7,6 @@ import {
   XCircleIcon,
 } from '@phosphor-icons/react'
 import { motion } from 'motion/react'
-
-import { ShimmeringText } from '@general-poke/ui/components/shimmering-text'
-import { cn } from '@/lib/utils'
 
 import type { NormalizedToolCall } from '../../lib/agent-state'
 

@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 
+import { Toaster } from '@general-poke/ui/components/sonner'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 import {
   createRootRouteWithContext,
@@ -7,8 +8,6 @@ import {
   Scripts,
 } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
-
-import { Toaster } from '@general-poke/ui/components/sonner'
 
 import TanStackQueryDevtools from '../lib/tanstack-query/devtools'
 import appCss from '../styles.css?url'

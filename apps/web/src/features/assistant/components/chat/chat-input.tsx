@@ -1,5 +1,6 @@
+import { cn } from '@general-poke/ui'
+
 import { requestNotificationPermissionIfDefault } from '@/lib/notifications'
-import { cn } from '@/lib/utils'
 
 import { useChatDraftStore } from '../../store/chat-draft-store'
 import { SendButton } from './send-button'

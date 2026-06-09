@@ -1,7 +1,8 @@
+import { cn } from '@general-poke/ui'
+
 import GmailIcon from '@/assets/gmail-icon'
 import GoogleCalendarIcon from '@/assets/google-calendar-icon'
 import GoogleMeetIcon from '@/assets/google-meet-icon'
-import { cn } from '@/lib/utils'
 
 type GoogleProductIconsProps = {
   className?: string

@@ -32,10 +32,12 @@ __pycache__/
 *.db-wal
 
 # Data folder
+apps/server/data/
 server/data/
 data/
 
 # Python virtual environment
+apps/server/venv/
 server/venv/
 
 # Build metadata
@@ -43,8 +45,11 @@ server/venv/
 /package-lock.json
 
 # Generated documentation / analysis artifacts
+apps/server/generated/openapi.json
 server/generated/openapi.json
+apps/server/repomix-output.txt
 server/repomix-output.txt
+apps/server/plans/
 server/plans/
 
 # direnv (local conda activation; see .envrc.example)

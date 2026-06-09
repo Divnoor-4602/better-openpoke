@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "assemblyai-docs": {
+      "type": "http",
+      "url": "https://mcp.assemblyai.com/docs",
+      "directTools": true
+    },
+    "convex": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "convex@latest",
+        "mcp",
+        "start"
+      ],
+      "directTools": true
+    }
+  }
+}

@@ -1,10 +1,10 @@
 import type { HTMLMotionProps } from 'motion/react'
 
+import { cn } from '@general-poke/ui'
+import { buttonVariants } from '@general-poke/ui/components/button'
 import { AnimatePresence, motion } from 'motion/react'
 
 import GoogleIcon from '@/assets/google-icon'
-import { buttonVariants } from '@general-poke/ui/components/button'
-import { cn } from '@/lib/utils'
 
 import type { GoogleIntegrationStatus } from '../hooks/use-google-integration'
 

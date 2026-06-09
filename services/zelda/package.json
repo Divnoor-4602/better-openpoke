@@ -1,0 +1,27 @@
+{
+  "name": "@general-poke/zelda",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/app.ts",
+    "./client": "./src/client.ts",
+    "./types": "./src/types.ts"
+  },
+  "scripts": {
+    "dev": "bun --hot src/index.ts",
+    "start": "bun src/index.ts",
+    "build": "tsc --noEmit",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "assemblyai": "^4.34.4",
+    "hono": "^4.6.0",
+    "jose": "^6.2.3"
+  },
+  "devDependencies": {
+    "@general-poke/config": "workspace:*",
+    "@types/bun": "^1.1.0",
+    "eslint": "^9.20.0",
+    "typescript": "^6.0.2"
+  }
+}

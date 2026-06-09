@@ -1,0 +1,31 @@
+{
+  "name": "@general-poke/db",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./api": "./convex/api.ts",
+    "./types": "./convex/types.ts"
+  },
+  "scripts": {
+    "dev": "convex dev",
+    "build": "tsc -p convex/tsconfig.json --noEmit",
+    "codegen": "convex codegen",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^3.0.68",
+    "@clerk/backend": "^3.5.0",
+    "@convex-dev/agent": "^0.6.2",
+    "ai": "^6.0.198",
+    "convex": "^1.32.0",
+    "convex-helpers": "^0.1.119",
+    "jose": "^6.2.3",
+    "svix": "^1.95.2"
+  },
+  "devDependencies": {
+    "@general-poke/config": "workspace:*",
+    "@types/node": "^25.9.2",
+    "eslint": "^9.20.0",
+    "typescript": "^6.0.2"
+  }
+}

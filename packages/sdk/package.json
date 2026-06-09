@@ -22,7 +22,7 @@
     }
   },
   "scripts": {
-    "generate": "python3 ../../server/scripts/export_openapi.py --output ../../server/generated/openapi.json && openapi-ts",
+    "generate": "python3 ../../apps/server/scripts/export_openapi.py --output ../../apps/server/generated/openapi.json && openapi-ts",
     "build": "tsc --noEmit",
     "check": "bun run generate && git diff --exit-code -- src/generated && bun run build"
   },

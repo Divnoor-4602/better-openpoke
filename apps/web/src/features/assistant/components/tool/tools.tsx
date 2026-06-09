@@ -1,7 +1,6 @@
+import { cn } from '@general-poke/ui'
 import { motion, useReducedMotion } from 'motion/react'
 import { useId, useState } from 'react'
-
-import { cn } from '@/lib/utils'
 
 import type { NormalizedToolCall } from '../../lib/agent-state'
 

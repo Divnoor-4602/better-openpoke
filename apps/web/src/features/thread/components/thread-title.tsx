@@ -1,7 +1,6 @@
+import { cn } from '@general-poke/ui'
 import { zThreadUpdateRequest } from '@openpoke/sdk/zod'
 import { useState } from 'react'
-
-import { cn } from '@/lib/utils'
 
 type ThreadTitleProps = {
   className?: string
