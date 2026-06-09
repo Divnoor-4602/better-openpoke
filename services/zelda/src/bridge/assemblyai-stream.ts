@@ -19,12 +19,24 @@ export type AssemblyAiTurn = {
   speaker: null | string
   startMs: null | number
   transcript: string
+  turnOrder: number
+}
+
+export type AssemblyAiSpeakerRevisionItem = {
+  speaker: null | string
+  turnOrder: number
+}
+
+export type AssemblyAiSpeakerRevision = {
+  meetingId: string
+  revisions: AssemblyAiSpeakerRevisionItem[]
 }
 
 export type AssemblyAiStreamOptions = {
   apiKey: string
   meetingId: string
   onError?: (err: Error) => void
+  onSpeakerRevision?: (event: AssemblyAiSpeakerRevision) => void
   onTurn: (turn: AssemblyAiTurn) => void
 }
 
@@ -45,7 +57,7 @@ export function createAssemblyAiStream(
     redactPii: true,
     redactPiiPolicies: PII_POLICIES,
     redactPiiSub: 'entity_name',
-    sampleRate: 16_000,
+    sampleRate: 24_000,
     speakerLabels: true,
     speechModel: 'u3-rt-pro',
   })
@@ -76,6 +88,18 @@ export function createAssemblyAiStream(
       speaker: turn.speaker_label ?? null,
       startMs,
       transcript: turn.transcript,
+      turnOrder: turn.turn_order,
+    })
+  })
+
+  transcriber.on('speakerRevision', (event) => {
+    if (!opts.onSpeakerRevision) return
+    opts.onSpeakerRevision({
+      meetingId: opts.meetingId,
+      revisions: event.revisions.map((r) => ({
+        speaker: r.speaker_label ?? null,
+        turnOrder: r.turn_order,
+      })),
     })
   })
 

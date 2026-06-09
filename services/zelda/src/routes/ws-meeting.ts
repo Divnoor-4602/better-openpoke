@@ -67,6 +67,7 @@ export async function wsMeetingHandler(
   }
 
   const session = await c.var.sessions.open({
+    listenerToken: token,
     meetingId,
     userId: claims.userId,
   })

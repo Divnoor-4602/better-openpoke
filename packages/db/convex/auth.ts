@@ -6,7 +6,7 @@ import {
 } from 'convex-helpers/server/customFunctions'
 
 import type { QueryCtx } from './_generated/server'
-import type { TUser, TUserId } from './user/validator'
+import type { TUser, TUserId } from './user/validators'
 
 import { action, mutation, query } from './_generated/server'
 import { validationError } from './error'

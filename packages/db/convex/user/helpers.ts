@@ -1,7 +1,7 @@
 import type { UserJSON } from '@clerk/backend'
 
 import type { QueryCtx } from '../_generated/server'
-import type { TUser } from './validator'
+import type { TUser } from './validators'
 
 import { validationError } from '../error'
 

@@ -14,6 +14,7 @@ export type SpeakerInfo = {
 
 export type Session = {
   readonly currentSpeaker: () => null | SpeakerInfo
+  readonly listenerToken: string
   readonly meetingId: string
   readonly sendAudio: (frame: ArrayBufferLike) => void
   readonly startedAt: number
@@ -33,6 +34,7 @@ export type SessionManager = {
   readonly get: (meetingId: string) => Session | undefined
   readonly list: () => Session[]
   readonly open: (args: {
+    listenerToken: string
     meetingId: string
     userId: string
   }) => Promise<Session>
@@ -44,7 +46,11 @@ export function createSessionManager(
 ): SessionManager {
   const sessions = new Map<string, Session>()
 
-  async function open(args: { meetingId: string; userId: string }) {
+  async function open(args: {
+    listenerToken: string
+    meetingId: string
+    userId: string
+  }) {
     const existing = sessions.get(args.meetingId)
     if (existing) return existing
 
@@ -59,6 +65,14 @@ export function createSessionManager(
       onError: (err) => {
         console.error('[session]', args.meetingId, 'aai error', err.message)
       },
+      onSpeakerRevision: (event) => {
+        void opts.sink.onSpeakerRevision({
+          listenerToken: args.listenerToken,
+          meetingId: args.meetingId,
+          revisions: event.revisions,
+          userId: args.userId,
+        })
+      },
       onTurn: (turn) => {
         if (!turn.endOfTurn) return
         utterances += 1
@@ -67,6 +81,7 @@ export function createSessionManager(
         void opts.sink.onTurn({
           ...turn,
           endOfTurn: true,
+          listenerToken: args.listenerToken,
           speaker: finalSpeaker,
           userId: args.userId,
         })
@@ -78,6 +93,7 @@ export function createSessionManager(
 
     const session: Session = {
       currentSpeaker: () => speaker,
+      listenerToken: args.listenerToken,
       meetingId: args.meetingId,
       sendAudio: (frame) => stream!.sendAudio(frame),
       startedAt: Date.now(),

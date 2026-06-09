@@ -20,7 +20,8 @@
     "convex": "^1.32.0",
     "convex-helpers": "^0.1.119",
     "jose": "^6.2.3",
-    "svix": "^1.95.2"
+    "svix": "^1.95.2",
+    "zod": "^4"
   },
   "devDependencies": {
     "@general-poke/config": "workspace:*",
