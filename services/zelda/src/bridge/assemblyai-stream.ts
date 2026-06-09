@@ -42,7 +42,7 @@ export type AssemblyAiStreamOptions = {
 
 export type AssemblyAiStream = {
   readonly ready: Promise<void>
-  readonly sendAudio: (frame: ArrayBufferLike) => void
+  readonly sendAudio: (frame: ArrayBufferLike | Uint8Array) => void
   readonly sessionId: () => null | string
   readonly terminate: () => Promise<void>
 }
@@ -80,6 +80,12 @@ export function createAssemblyAiStream(
   transcriber.on('turn', (turn) => {
     const startMs = turn.words[0]?.start ?? null
     const endMs = turn.words.at(-1)?.end ?? null
+    // Diagnostic: log Turn arrivals with metadata only (no text content).
+    console.log('[aai]', opts.meetingId, 'turn', {
+      endOfTurn: turn.end_of_turn,
+      textLength: turn.transcript.length,
+      turnOrder: turn.turn_order,
+    })
     opts.onTurn({
       endMs,
       endOfTurn: turn.end_of_turn,
@@ -104,7 +110,12 @@ export function createAssemblyAiStream(
   })
 
   transcriber.on('error', (err) => {
+    console.error('[aai]', opts.meetingId, 'error', err)
     opts.onError?.(err)
+  })
+
+  transcriber.on('close', (code, reason) => {
+    console.log('[aai]', opts.meetingId, 'closed', { code, reason })
   })
 
   void transcriber.connect()
@@ -112,7 +123,7 @@ export function createAssemblyAiStream(
   return {
     ready,
     sendAudio(frame) {
-      transcriber.sendAudio(frame)
+      transcriber.sendAudio(frame as ArrayBufferLike)
     },
     sessionId: () => sessionId,
     async terminate() {

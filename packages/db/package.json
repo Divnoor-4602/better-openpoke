@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     "./api": "./convex/api.ts",
+    "./compliance": "./convex/compliance/consent.ts",
     "./types": "./convex/types.ts"
   },
   "scripts": {
@@ -16,6 +17,7 @@
     "@ai-sdk/openai": "^3.0.68",
     "@clerk/backend": "^3.5.0",
     "@convex-dev/agent": "^0.6.2",
+    "@meeting-baas/sdk": "^6.1.4",
     "ai": "^6.0.198",
     "convex": "^1.32.0",
     "convex-helpers": "^0.1.119",

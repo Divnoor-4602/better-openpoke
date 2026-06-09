@@ -16,7 +16,7 @@ export type Session = {
   readonly currentSpeaker: () => null | SpeakerInfo
   readonly listenerToken: string
   readonly meetingId: string
-  readonly sendAudio: (frame: ArrayBufferLike) => void
+  readonly sendAudio: (frame: ArrayBufferLike | Uint8Array) => void
   readonly startedAt: number
   readonly state: () => SessionState
   readonly terminate: () => Promise<void>

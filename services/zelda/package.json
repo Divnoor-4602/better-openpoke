@@ -14,8 +14,10 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@general-poke/db": "workspace:*",
     "@meeting-baas/sdk": "^6.1.4",
     "assemblyai": "^4.34.4",
+    "convex": "^1.32.0",
     "hono": "^4.6.0",
     "jose": "^6.2.3"
   },

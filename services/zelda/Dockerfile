@@ -11,6 +11,7 @@ COPY apps/legal-poke/package.json apps/legal-poke/
 
 RUN bun install
 
+COPY packages/db packages/db
 COPY services/zelda services/zelda
 
 WORKDIR /app/services/zelda

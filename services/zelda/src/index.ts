@@ -1,6 +1,7 @@
 import { createApp, websocket } from './app'
 import { createSessionManager } from './session/manager'
 import { consoleSink } from './sink'
+import { createConvexSink } from './sinks/convex-sink'
 
 const assemblyAiKey = process.env.ASSEMBLYAI_API_KEY
 if (!assemblyAiKey) {
@@ -8,9 +9,15 @@ if (!assemblyAiKey) {
   process.exit(1)
 }
 
+const convexUrl = process.env.CONVEX_URL
+const sink = convexUrl ? createConvexSink({ convexUrl }) : consoleSink
+if (!convexUrl) {
+  console.warn('CONVEX_URL not set — using consoleSink (turns will not persist)')
+}
+
 const sessions = createSessionManager({
   assemblyAiKey,
-  sink: consoleSink,
+  sink,
 })
 
 const app = createApp({ sessions })

@@ -8,6 +8,7 @@
     "./lib/utils": "./src/lib/utils.ts",
     "./hooks/use-mobile": "./src/hooks/use-mobile.ts",
     "./hooks/use-timeout": "./src/hooks/use-timeout.ts",
+    "./components/alert-dialog": "./src/components/alert-dialog.tsx",
     "./components/button": "./src/components/button.tsx",
     "./components/chip-button": "./src/components/chip-button.tsx",
     "./components/copy-button": "./src/components/copy-button.tsx",

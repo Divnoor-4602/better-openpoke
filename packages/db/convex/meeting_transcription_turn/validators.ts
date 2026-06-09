@@ -10,10 +10,10 @@ export const vMeetingTranscriptTurn = v.object({
   createdAt: v.number(),
   endMs: v.optional(v.number()),
   meetingId: Meeting._id,
-  turnOrder: v.number(),
   speakerLabel: v.optional(v.string()),
   startMs: v.optional(v.number()),
   text: v.string(),
+  turnOrder: v.number(),
   userId: User._id,
 })
 

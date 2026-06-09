@@ -5,7 +5,12 @@ import type { AppEnv } from '../context'
 type WebhookEvent = {
   data?: {
     bot_id?: string
+    code?: string
+    error?: string
+    error_type?: string
     meeting_id?: string
+    message?: string
+    sub_code?: string
   }
   event?: string
 }
@@ -26,7 +31,15 @@ export const webhookMeetingbaas = new Hono<AppEnv>().post(
     if (!body) return c.json({ error: 'invalid_json' }, 400)
 
     const meetingId = body.data?.meeting_id ?? null
-    console.log('[mb-webhook]', body.event, { meetingId })
+    console.log('[mb-webhook]', body.event, {
+      botId: body.data?.bot_id ?? null,
+      code: body.data?.code ?? null,
+      error: body.data?.error ?? null,
+      errorType: body.data?.error_type ?? null,
+      meetingId,
+      message: body.data?.message ?? null,
+      subCode: body.data?.sub_code ?? null,
+    })
 
     if (body.event === 'bot.left' || body.event === 'bot.error') {
       const session = meetingId ? c.var.sessions.get(meetingId) : undefined

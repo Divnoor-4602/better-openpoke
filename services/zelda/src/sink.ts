@@ -23,22 +23,23 @@ export type TurnSink = {
   readonly onTurn: (turn: FinalizedTurn) => Promise<void> | void
 }
 
+// consoleSink logs metadata only — transcript content is intentionally NOT
+// included (compliance §3: no sensitive content in logs).
 export const consoleSink: TurnSink = {
   onSpeakerRevision(event) {
-    console.log('[speaker-revision]', {
+    console.log('[turn-sink] revision', {
       count: event.revisions.length,
       meetingId: event.meetingId,
-      revisions: event.revisions,
       userId: event.userId,
     })
   },
   onTurn(turn) {
-    console.log('[turn]', {
+    console.log('[turn-sink] turn', {
       endMs: turn.endMs,
       meetingId: turn.meetingId,
       speaker: turn.speaker,
       startMs: turn.startMs,
-      text: turn.transcript,
+      textLength: turn.transcript.length,
       turnOrder: turn.turnOrder,
       userId: turn.userId,
     })

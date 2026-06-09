@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ProtectedRouteImport } from './routes/_protected'
 import { Route as ProtectedIndexRouteImport } from './routes/_protected/index'
+import { Route as ProtectedNotesNoteIdRouteImport } from './routes/_protected/notes.$noteId'
+import { Route as ProtectedMeetingsMeetingIdRouteImport } from './routes/_protected/meetings.$meetingId'
 import { Route as authSignUpSplatRouteImport } from './routes/(auth)/sign-up.$'
 import { Route as authSignInSplatRouteImport } from './routes/(auth)/sign-in.$'
 
@@ -23,6 +25,17 @@ const ProtectedIndexRoute = ProtectedIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ProtectedRoute,
 } as any)
+const ProtectedNotesNoteIdRoute = ProtectedNotesNoteIdRouteImport.update({
+  id: '/notes/$noteId',
+  path: '/notes/$noteId',
+  getParentRoute: () => ProtectedRoute,
+} as any)
+const ProtectedMeetingsMeetingIdRoute =
+  ProtectedMeetingsMeetingIdRouteImport.update({
+    id: '/meetings/$meetingId',
+    path: '/meetings/$meetingId',
+    getParentRoute: () => ProtectedRoute,
+  } as any)
 const authSignUpSplatRoute = authSignUpSplatRouteImport.update({
   id: '/(auth)/sign-up/$',
   path: '/sign-up/$',
@@ -38,11 +51,15 @@ export interface FileRoutesByFullPath {
   '/': typeof ProtectedIndexRoute
   '/sign-in/$': typeof authSignInSplatRoute
   '/sign-up/$': typeof authSignUpSplatRoute
+  '/meetings/$meetingId': typeof ProtectedMeetingsMeetingIdRoute
+  '/notes/$noteId': typeof ProtectedNotesNoteIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof ProtectedIndexRoute
   '/sign-in/$': typeof authSignInSplatRoute
   '/sign-up/$': typeof authSignUpSplatRoute
+  '/meetings/$meetingId': typeof ProtectedMeetingsMeetingIdRoute
+  '/notes/$noteId': typeof ProtectedNotesNoteIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -50,18 +67,32 @@ export interface FileRoutesById {
   '/_protected/': typeof ProtectedIndexRoute
   '/(auth)/sign-in/$': typeof authSignInSplatRoute
   '/(auth)/sign-up/$': typeof authSignUpSplatRoute
+  '/_protected/meetings/$meetingId': typeof ProtectedMeetingsMeetingIdRoute
+  '/_protected/notes/$noteId': typeof ProtectedNotesNoteIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/sign-in/$' | '/sign-up/$'
+  fullPaths:
+    | '/'
+    | '/sign-in/$'
+    | '/sign-up/$'
+    | '/meetings/$meetingId'
+    | '/notes/$noteId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/sign-in/$' | '/sign-up/$'
+  to:
+    | '/'
+    | '/sign-in/$'
+    | '/sign-up/$'
+    | '/meetings/$meetingId'
+    | '/notes/$noteId'
   id:
     | '__root__'
     | '/_protected'
     | '/_protected/'
     | '/(auth)/sign-in/$'
     | '/(auth)/sign-up/$'
+    | '/_protected/meetings/$meetingId'
+    | '/_protected/notes/$noteId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -86,6 +117,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProtectedIndexRouteImport
       parentRoute: typeof ProtectedRoute
     }
+    '/_protected/notes/$noteId': {
+      id: '/_protected/notes/$noteId'
+      path: '/notes/$noteId'
+      fullPath: '/notes/$noteId'
+      preLoaderRoute: typeof ProtectedNotesNoteIdRouteImport
+      parentRoute: typeof ProtectedRoute
+    }
+    '/_protected/meetings/$meetingId': {
+      id: '/_protected/meetings/$meetingId'
+      path: '/meetings/$meetingId'
+      fullPath: '/meetings/$meetingId'
+      preLoaderRoute: typeof ProtectedMeetingsMeetingIdRouteImport
+      parentRoute: typeof ProtectedRoute
+    }
     '/(auth)/sign-up/$': {
       id: '/(auth)/sign-up/$'
       path: '/sign-up/$'
@@ -105,10 +150,14 @@ declare module '@tanstack/react-router' {
 
 interface ProtectedRouteChildren {
   ProtectedIndexRoute: typeof ProtectedIndexRoute
+  ProtectedMeetingsMeetingIdRoute: typeof ProtectedMeetingsMeetingIdRoute
+  ProtectedNotesNoteIdRoute: typeof ProtectedNotesNoteIdRoute
 }
 
 const ProtectedRouteChildren: ProtectedRouteChildren = {
   ProtectedIndexRoute: ProtectedIndexRoute,
+  ProtectedMeetingsMeetingIdRoute: ProtectedMeetingsMeetingIdRoute,
+  ProtectedNotesNoteIdRoute: ProtectedNotesNoteIdRoute,
 }
 
 const ProtectedRouteWithChildren = ProtectedRoute._addFileChildren(
